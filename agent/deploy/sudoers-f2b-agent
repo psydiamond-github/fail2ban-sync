@@ -1,0 +1,4 @@
+# Устанавливается install_agent.sh как /etc/sudoers.d/f2b-agent, chmod 440, root:root.
+# CHANGE_ME_AGENT_USER заменяется install-скриптом на реального системного пользователя,
+# от чьего имени работает systemd-таймер f2b-agent-checkin (не root — см. docs/TZ.md §6).
+CHANGE_ME_AGENT_USER ALL=(root) NOPASSWD: /usr/local/sbin/f2b-agent-helper

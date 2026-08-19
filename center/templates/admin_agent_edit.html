@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}{{ agent['name'] }} — настройка агента{% endblock %}
+{% block content %}
+<h1>Настройка агента «{{ agent['name'] }}»</h1>
+<div class="panel">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p><label>Группа<br>
+      <select name="group_id">
+        <option value="">— без группы —</option>
+        {% for g in groups %}
+        <option value="{{ g['id'] }}" {% if g['id'] == agent['group_id'] %}selected{% endif %}>{{ g['name'] }}</option>
+        {% endfor %}
+      </select>
+    </label></p>
+    <p><label>Привязка к IP (пусто — не используется)<br>
+      <input name="pinned_ip" value="{{ agent['pinned_ip'] or '' }}" placeholder="203.0.113.5">
+    </label></p>
+    <p><label>Режим привязки<br>
+      <select name="ip_pin_mode">
+        <option value="advisory" {% if agent['ip_pin_mode'] == 'advisory' %}selected{% endif %}>advisory (только уведомление)</option>
+        <option value="strict" {% if agent['ip_pin_mode'] == 'strict' %}selected{% endif %}>strict (отклонять чекин)</option>
+      </select>
+    </label></p>
+    <p><label>Graylog source (пусто — использовать имя агента)<br>
+      <input name="graylog_source" value="{{ agent['graylog_source'] or '' }}">
+    </label></p>
+    <p><label>Разрешённые джейлы (по одному на строку, «имя bantime_секунд»)<br>
+      <textarea name="allowed_jails" rows="6" style="width:100%">{% for j in agent['allowed_jails'] %}{{ j['name'] }} {{ j['bantime'] }}
+{% endfor %}</textarea>
+    </label></p>
+    <button type="submit">Сохранить</button>
+  </form>
+</div>
+<p class="muted">Токен здесь не редактируется — используйте «новый токен» на странице «Управление агентами».</p>
+
+{% if vpn_enabled %}
+<h2>VPN (WireGuard)</h2>
+<div class="panel">
+  {% if vpn_peer %}
+    <p>Подключён: <b>{{ vpn_peer['assigned_ip'] }}</b></p>
+    <p class="muted">На агенте (install_agent.sh --setup-vpn):<br>
+      <code>--vpn-server-pubkey {{ vpn_center_pubkey }} --vpn-server-endpoint {{ vpn_endpoint }}
+        --vpn-assigned-ip {{ vpn_peer['assigned_ip'] }}/{{ vpn_subnet_prefix }}</code></p>
+    <form method="post" action="{{ url_for('admin_agent_vpn_remove', agent_id=agent['id']) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="danger">Отключить от VPN</button>
+    </form>
+  {% else %}
+    <p class="muted">
+      На агенте выполните <code>install_agent.sh ... --setup-vpn</code> — он сгенерирует ключ и
+      напечатает публичный ключ. Вставьте его сюда:
+    </p>
+    <form method="post" action="{{ url_for('admin_agent_vpn_add', agent_id=agent['id']) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input name="wg_pubkey" placeholder="публичный ключ агента" style="width:60%" required>
+      <button type="submit">Добавить в VPN</button>
+    </form>
+  {% endif %}
+</div>
+{% endif %}
+
+<p><a href="{{ url_for('admin_agents') }}">← назад к списку агентов</a></p>
+{% endblock %}

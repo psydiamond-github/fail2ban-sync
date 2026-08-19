@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}fail2ban-center{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    (function () {
+      var saved = localStorage.getItem("f2b-theme");
+      if (saved) document.documentElement.setAttribute("data-theme", saved);
+    })();
+  </script>
+</head>
+<body>
+{% if current_username %}
+<header class="topnav">
+  <a class="brand" href="{{ url_for('dashboard') }}">fail2ban-center</a>
+  <a href="{{ url_for('dashboard') }}">Агенты</a>
+  <a href="{{ url_for('admin_blocklist') }}">Блок-лист</a>
+  <a href="{{ url_for('audit') }}">Аудит</a>
+  {% if current_role == 'admin' %}
+    <a href="{{ url_for('admin_agents') }}">Управление агентами</a>
+    <a href="{{ url_for('admin_groups') }}">Группы</a>
+    <a href="{{ url_for('admin_users') }}">Пользователи</a>
+    <a href="{{ url_for('admin_settings') }}">Настройки</a>
+  {% endif %}
+  <span class="spacer"></span>
+  <button type="button" class="secondary" onclick="f2bToggleTheme()" title="Светлая/тёмная тема">◐</button>
+  <a href="{{ url_for('account') }}">{{ current_username }}</a>
+  <span class="role">({{ current_role }})</span>
+  <a href="{{ url_for('logout') }}">выйти</a>
+</header>
+{% endif %}
+<script>
+  function f2bToggleTheme() {
+    var current = document.documentElement.getAttribute("data-theme");
+    var isDark = current ? current === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = isDark ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("f2b-theme", next);
+  }
+</script>
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

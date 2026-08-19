@@ -1,0 +1,14 @@
+[Unit]
+Description=f2b-log-forward-gelf — форвардер лога fail2ban в Graylog (опционально, режим log_view_mode=graylog)
+After=network-online.target fail2ban.service
+
+[Service]
+Type=simple
+User=root
+# CHANGE_ME: адрес:порт Graylog GELF TCP input, имя источника (= имя агента на центре), путь к логу.
+ExecStart=/usr/bin/python3 /opt/f2b-agent/f2b-log-forward-gelf.py CHANGE_ME_GRAYLOG_HOST CHANGE_ME_GRAYLOG_PORT CHANGE_ME_AGENT_NAME /var/log/fail2ban.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

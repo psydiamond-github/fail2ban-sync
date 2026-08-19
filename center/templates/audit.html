@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Аудит-лог — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Аудит-лог{% if agent_id %} — агент #{{ agent_id }}{% endif %}</h1>
+<div class="panel">
+  <table>
+    <tr><th>Время</th><th>Кто</th><th>Агент</th><th>Действие</th><th>IP</th><th>Джейл</th><th>Детали</th></tr>
+    {% for e in entries %}
+    <tr>
+      <td class="muted">{{ e['ts'] }}</td>
+      <td>{{ e['actor'] }}</td>
+      <td class="muted">{{ e['agent_id'] or '' }}</td>
+      <td>{{ e['action'] }}</td>
+      <td class="muted">{{ e['ip'] or '' }}</td>
+      <td class="muted">{{ e['jail'] or '' }}</td>
+      <td class="muted">{{ e['detail'] or '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">записей нет</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

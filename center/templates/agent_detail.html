@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}{{ agent['name'] }} — fail2ban-center{% endblock %}
+{% block content %}
+<h1>{{ agent['name'] }}
+  {% if agent['revoked_at'] %}<span class="badge error">отозван</span>{% endif %}
+</h1>
+<p class="muted">
+  Последний чекин: {{ agent['last_seen'] or '—' }}
+  {% if agent['last_ip'] %}с {{ agent['last_ip'] }}{% endif %}
+  {% if agent['last_agent_version'] %} · версия агента {{ agent['last_agent_version'] }}{% endif %}
+  {% if agent['pinned_ip'] %} · привязка к IP: {{ agent['pinned_ip'] }} ({{ agent['ip_pin_mode'] }}){% endif %}
+</p>
+
+<form method="post" action="{{ url_for('agent_refresh', agent_id=agent['id']) }}" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="secondary">Запросить полное состояние</button>
+</form>
+
+<h2>Баны по джейлам</h2>
+{% for jail, rows in bans_by_jail.items() %}
+<div class="panel">
+  <strong>{{ jail }}</strong> <span class="muted">— забанено: {{ rows | length }}</span>
+  <table>
+    <tr><th>IP</th><th>с</th><th></th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r['ip'] }}</td>
+      <td class="muted">{{ r['since'] or '—' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('agent_unban', agent_id=agent['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="jail" value="{{ jail }}">
+          <input type="hidden" name="ip" value="{{ r['ip'] }}">
+          <button type="submit" class="secondary">разбанить</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="muted">нет банов</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+
+{% if current_role == 'admin' %}
+<h2>Забанить</h2>
+<div class="panel">
+  <form method="post" action="{{ url_for('agent_ban', agent_id=agent['id']) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="jail" required>
+      {% for j in agent['allowed_jails'] %}<option value="{{ j['name'] }}">{{ j['name'] }}</option>{% endfor %}
+    </select>
+    <input name="ip" placeholder="1.2.3.4" required>
+    <button type="submit">Забанить</button>
+  </form>
+  <form method="post" action="{{ url_for('agent_ban_forever', agent_id=agent['id']) }}" style="margin-top:0.5rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="ip" placeholder="1.2.3.4" required>
+    <button type="submit">Забанить навсегда</button>
+  </form>
+</div>
+{% endif %}
+
+<h2>Временный игнор</h2>
+<div class="panel">
+  <table>
+    <tr><th>Джейл</th><th>IP</th><th>до</th><th>кем</th><th></th></tr>
+    {% for r in temp_ignore %}
+    <tr>
+      <td>{{ r['jail'] }}</td><td>{{ r['ip'] }}</td><td class="muted">{{ r['expires_at'] }}</td>
+      <td class="muted">{{ r['created_by'] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('agent_temp_ignore_remove', agent_id=agent['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="jail" value="{{ r['jail'] }}">
+          <input type="hidden" name="ip" value="{{ r['ip'] }}">
+          <button type="submit" class="secondary">снять</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">нет записей</td></tr>
+    {% endfor %}
+  </table>
+  <form method="post" action="{{ url_for('agent_temp_ignore_add', agent_id=agent['id']) }}" style="margin-top:0.6rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="jail" required>
+      {% for j in agent['allowed_jails'] %}<option value="{{ j['name'] }}">{{ j['name'] }}</option>{% endfor %}
+    </select>
+    <input name="ip" placeholder="1.2.3.4" required>
+    <input name="minutes" type="number" value="60" min="1" style="width:5rem"> мин
+    <input name="comment" placeholder="комментарий">
+    <button type="submit">Добавить игнор</button>
+  </form>
+</div>
+
+<h2>Постоянный игнор</h2>
+<div class="panel">
+  <table>
+    <tr><th>IP</th><th>кем</th><th>комментарий</th>{% if current_role == 'admin' %}<th></th>{% endif %}</tr>
+    {% for r in permanent_ignore %}
+    <tr>
+      <td>{{ r['ip'] }}</td><td class="muted">{{ r['created_by'] }}</td><td class="muted">{{ r['comment'] or '' }}</td>
+      {% if current_role == 'admin' %}
+      <td>
+        <form method="post" action="{{ url_for('agent_permanent_ignore_remove', agent_id=agent['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="ip" value="{{ r['ip'] }}">
+          <button type="submit" class="secondary">снять</button>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">нет записей</td></tr>
+    {% endfor %}
+  </table>
+  {% if current_role == 'admin' %}
+  <form method="post" action="{{ url_for('agent_permanent_ignore_add', agent_id=agent['id']) }}" style="margin-top:0.6rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="ip" placeholder="1.2.3.4" required>
+    <input name="comment" placeholder="комментарий">
+    <button type="submit">Добавить</button>
+  </form>
+  {% endif %}
+</div>
+
+<h2>Последние задачи <span class="muted">(<a href="{{ url_for('audit', agent=agent['id']) }}">весь аудит-лог этого агента →</a>)</span></h2>
+<div class="panel">
+  <table>
+    <tr><th>#</th><th>Тип</th><th>Статус</th><th>Создана</th><th>Кем</th><th>Результат</th></tr>
+    {% for t in recent_tasks %}
+    <tr>
+      <td>{{ t['id'] }}</td><td>{{ t['type'] }}</td>
+      <td><span class="badge {{ t['status'] }}">{{ t['status'] }}</span></td>
+      <td class="muted">{{ t['created_at'] }}</td>
+      <td class="muted">{{ t['created_by'] }}</td>
+      <td class="muted">{{ t['result_detail'] or '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">нет задач</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Лог</h2>
+<div class="panel">
+  {% if log_view_mode == 'none' %}
+    <p class="muted">Просмотр логов выключен — включите в «Настройках» (локально на центре или через Graylog).</p>
+  {% elif log_view_mode == 'graylog' %}
+    {% if not graylog_configured %}
+      <p class="muted">Graylog не настроен — см. раздел «Настройки».</p>
+    {% else %}
+      <form method="get">
+        <input type="hidden" name="tab" value="log">
+        <input name="jail" placeholder="фильтр по джейлу (необязательно)" value="{{ request.args.get('jail', '') }}">
+        <select name="range_hours">
+          {% for h in [1, 6, 24, 72, 168] %}
+          <option value="{{ h }}" {% if h == range_hours %}selected{% endif %}>{{ h }} ч</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="secondary">Показать лог</button>
+        {% if log_link %}<a href="{{ log_link }}" target="_blank" class="muted">Открыть в Graylog →</a>{% endif %}
+      </form>
+      {% if log_error %}
+        <p class="flash error">{{ log_error }}</p>
+      {% elif request.args.get('tab') == 'log' %}
+        <table>
+          <tr><th>время</th><th>сообщение</th></tr>
+          {% for m in log_messages %}
+          <tr><td class="muted">{{ m['message']['timestamp'] }}</td><td>{{ m['message']['message'] }}</td></tr>
+          {% else %}
+          <tr><td colspan="2" class="muted">нет сообщений за выбранный период</td></tr>
+          {% endfor %}
+        </table>
+      {% endif %}
+    {% endif %}
+  {% elif log_view_mode == 'local' %}
+    <p class="muted">
+      Лог докачивается инкрементально самим агентом на каждом чекине (только новые строки),
+      хранится на диске центра. Новые строки сверху.
+    </p>
+    <form method="get"><input type="hidden" name="tab" value="log">
+      <button type="submit" class="secondary">Обновить</button>
+    </form>
+    {% if request.args.get('tab') == 'log' %}
+      {% if local_log_text %}
+        <pre style="white-space:pre-wrap;word-break:break-all;">{{ local_log_text }}</pre>
+      {% else %}
+        <p class="muted">Пока пусто — появится после первого чекина агента.</p>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

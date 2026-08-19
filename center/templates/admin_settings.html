@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Настройки — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Настройки</h1>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+<div class="panel">
+  <h2 style="margin-top:0">Протокол агентов</h2>
+  <p><label>Интервал чекина по умолчанию, сек<br>
+    <input name="checkin_interval_seconds" value="{{ settings.get('checkin_interval_seconds', '60') }}"></label></p>
+  <p><label>Задача считается потерянной после стольких пропущенных чекинов<br>
+    <input name="agent_task_stale_after_missed" value="{{ settings.get('agent_task_stale_after_missed', '5') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Веб-интерфейс</h2>
+  <p><label>Тайм-аут сессии, мин<br>
+    <input name="session_idle_timeout_minutes" value="{{ settings.get('session_idle_timeout_minutes', '30') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Глобальный блок-лист</h2>
+  <p><label><input type="checkbox" name="global_block_enabled" value="1"
+      {% if settings.get('global_block_enabled') == '1' %}checked{% endif %}> включён</label></p>
+  <p><label>Порог банов<br>
+    <input name="global_block_threshold" value="{{ settings.get('global_block_threshold', '5') }}"></label></p>
+  <p><label>Режим срока блокировки<br>
+    <select name="global_block_duration_mode">
+      <option value="permanent" {% if settings.get('global_block_duration_mode') == 'permanent' %}selected{% endif %}>постоянно</option>
+      <option value="longest_jail_bantime" {% if settings.get('global_block_duration_mode') == 'longest_jail_bantime' %}selected{% endif %}>самый долгий bantime джейла агента</option>
+    </select></label></p>
+  <p><label>Параллелизм массовых операций<br>
+    <input name="global_block_bulk_max_workers" value="{{ settings.get('global_block_bulk_max_workers', '8') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Бан сети Tor</h2>
+  <p><label><input type="checkbox" name="tor_block_enabled" value="1"
+      {% if settings.get('tor_block_enabled') == '1' %}checked{% endif %}> включён</label></p>
+  <p><label>URL источника списка exit-нод<br>
+    <input name="tor_block_source_url" value="{{ settings.get('tor_block_source_url', '') }}" style="width:100%"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Просмотр логов</h2>
+  <p><label>Режим<br>
+    <select name="log_view_mode">
+      <option value="none" {% if settings.get('log_view_mode', 'none') == 'none' %}selected{% endif %}>выключен</option>
+      <option value="local" {% if settings.get('log_view_mode') == 'local' %}selected{% endif %}>локально на центре (агент докачивает инкрементально)</option>
+      <option value="graylog" {% if settings.get('log_view_mode') == 'graylog' %}selected{% endif %}>через Graylog</option>
+    </select></label></p>
+  <p><label>Строк лога на странице (режим «локально»)<br>
+    <input name="fail2ban_log_lines" value="{{ settings.get('fail2ban_log_lines', '300') }}"></label></p>
+  <p><label>Максимальный размер кэша на агента, байт (режим «локально»)<br>
+    <input name="local_log_max_bytes" value="{{ settings.get('local_log_max_bytes', '2000000') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Graylog — настройка подключения (нужна только для режима «через Graylog»)</h2>
+  <p class="muted">
+    На стороне Graylog: создайте вход (Input) типа <b>GELF TCP</b> (System → Inputs), с
+    <code>use_null_delimiter=true</code>, и убедитесь, что порт проброшен как TCP (не UDP).
+    Создайте отдельного пользователя с ролью Admin (не встроенный root/admin — у него в
+    некоторых версиях Graylog не работает выпуск персональных токенов) и выпустите ему
+    Personal Access Token (System → Users → ваш пользователь → Tokens). На каждом
+    управляемом хосте нужен свой форвардер, шлющий строки лога fail2ban в этот вход по
+    GELF TCP с полем <code>host</code> = имени агента (для сопоставления с
+    <code>graylog_source</code>, см. ниже) — простой пример скрипта есть в
+    <code>docs/</code> проекта.
+  </p>
+  <p><label>URL инстанса<br>
+    <input name="graylog_url" value="{{ settings.get('graylog_url', '') }}" style="width:100%" placeholder="https://graylog.example.org"></label></p>
+  <p><label>API-токен {% if settings.get('graylog_api_token') %}<span class="muted">(сохранён — оставьте пустым, чтобы не менять)</span>{% endif %}<br>
+    <input type="password" name="graylog_api_token" value=""
+           placeholder="{{ '••••••••••••••••' if settings.get('graylog_api_token') else '' }}"
+           autocomplete="new-password" style="width:100%"></label></p>
+  <p><label>Stream ID (необязательно)<br>
+    <input name="graylog_stream_id" value="{{ settings.get('graylog_stream_id', '') }}"></label></p>
+  <p><label>Диапазон по умолчанию, часов<br>
+    <input name="graylog_default_range_hours" value="{{ settings.get('graylog_default_range_hours', '24') }}"></label></p>
+  <p><label>Строк лога по умолчанию<br>
+    <input name="graylog_default_log_lines" value="{{ settings.get('graylog_default_log_lines', '300') }}"></label></p>
+</div>
+
+<button type="submit">Сохранить</button>
+</form>
+{% endblock %}

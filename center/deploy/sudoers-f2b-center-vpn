@@ -1,0 +1,3 @@
+# Устанавливается как /etc/sudoers.d/f2b-center-vpn, chmod 440, root:root.
+# CHANGE_ME_SERVICE_USER — тот же пользователь, что в deploy/fail2ban-center.service.
+CHANGE_ME_SERVICE_USER ALL=(root) NOPASSWD: /usr/local/sbin/f2b-center-vpn-helper
