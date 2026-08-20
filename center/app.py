@@ -260,9 +260,14 @@ def create_app() -> Flask:
             auth.flash_csrf_error()
             return redirect(url_for("agent_detail", agent_id=agent_id))
         ip = request.form.get("ip", "").strip()
+        everywhere = request.form.get("everywhere") == "1"
         try:
-            tasks.ban_forever(agent_id, ip, _actor())
-            flash(f"Бан навсегда {ip} поставлен в очередь.", "ok")
+            if everywhere:
+                tasks.ban_forever_everywhere(ip, agent_id, _actor())
+                flash(f"Бан навсегда {ip} поставлен в очередь на ВСЕ агенты (глобальный блок-лист).", "ok")
+            else:
+                tasks.ban_forever(agent_id, ip, _actor())
+                flash(f"Бан навсегда {ip} поставлен в очередь.", "ok")
         except ValueError as e:
             flash(str(e), "error")
         return redirect(url_for("agent_detail", agent_id=agent_id))
@@ -317,12 +322,21 @@ def create_app() -> Flask:
         if not auth.check_csrf(request.form):
             auth.flash_csrf_error()
             return redirect(url_for("agent_detail", agent_id=agent_id))
-        ip = request.form.get("ip", "").strip()
-        try:
-            tasks.add_permanent_ignore(agent_id, ip, _actor(), request.form.get("comment", ""))
-            flash(f"Постоянный игнор {ip} поставлен в очередь.", "ok")
-        except ValueError as e:
-            flash(str(e), "error")
+        text = request.form.get("ips", "")
+        upload = request.files.get("ips_file")
+        if upload and upload.filename:
+            text += "\n" + upload.read().decode("utf-8", errors="replace")
+        entries = tasks.parse_ip_list(text)
+        comment = request.form.get("comment", "")
+        if not entries:
+            flash("Не указано ни одного IP/сети.", "error")
+            return redirect(url_for("agent_detail", agent_id=agent_id))
+        bad = tasks.add_permanent_ignore_bulk(agent_id, entries, _actor(), comment)
+        ok_count = len(entries) - len(bad)
+        if ok_count:
+            flash(f"Постоянный игнор: {ok_count} запис(ей) поставлено в очередь.", "ok")
+        if bad:
+            flash(f"Не распознаны как IP/сеть, пропущены: {', '.join(bad)}", "error")
         return redirect(url_for("agent_detail", agent_id=agent_id))
 
     @app.route("/agents/<int:agent_id>/ignore/permanent/remove", methods=["POST"])

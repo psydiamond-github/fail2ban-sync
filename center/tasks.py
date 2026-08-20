@@ -22,6 +22,30 @@ def validate_ipv4(ip: str) -> None:
         raise ValueError(f"Некорректный IPv4-адрес: {ip}") from e
 
 
+def validate_ip_or_network(value: str) -> None:
+    """Игнор (в отличие от банов) осмысленно задавать не только одиночным IP, но и сетью —
+    ровно так уже хранится ignoreip в самом fail2ban (jail.local), см. baseline_ignoreip."""
+    try:
+        ipaddress.ip_network(value, strict=False)
+    except ValueError as e:
+        raise ValueError(f"Некорректный IP или сеть (CIDR): {value}") from e
+
+
+def parse_ip_list(text: str) -> list[str]:
+    """Разбирает список IP/сетей из текста — запятая, перевод строки или пробел вперемешку,
+    как для textarea, так и для содержимого загруженного файла."""
+    raw = text.replace(",", "\n").splitlines()
+    seen: set[str] = set()
+    result = []
+    for line in raw:
+        for token in line.split():
+            token = token.strip()
+            if token and token not in seen:
+                seen.add(token)
+                result.append(token)
+    return result
+
+
 def validate_jail_allowed(agent: dict[str, Any], jail: str) -> None:
     names = {j["name"] for j in agent["allowed_jails"]}
     if jail not in names:
@@ -381,6 +405,16 @@ def ban_forever(agent_id: int, ip: str, actor: str) -> None:
     manual_ban(agent_id, db.PERMANENT_BAN_JAIL, ip, actor)
 
 
+def ban_forever_everywhere(ip: str, triggered_by_agent_id: int, actor: str) -> None:
+    """«Забанить навсегда» сразу на все агенты — по явному запросу админа, не по порогу
+    повторов. Использует ТУ ЖЕ бухгалтерию, что и автоматическая эскалация глобального
+    блок-листа (apply_global_block_everywhere: global_blocklist/global_block_applied), а не
+    отдельный путь — иначе страница «Блок-лист» не знала бы об этих банах, а при более
+    позднем срабатывании порога центр повторно поставил бы туда же ещё одну задачу."""
+    validate_ipv4(ip)
+    apply_global_block_everywhere(ip, triggered_by_agent_id, ban_count=0, actor=actor)
+
+
 def manual_unban(agent_id: int, jail: str, ip: str, actor: str) -> None:
     validate_ipv4(ip)
     db.queue_task(agent_id, "unban", {"jail": jail, "ip": ip}, actor)
@@ -411,10 +445,30 @@ def sync_permanent_ignore(agent_id: int, actor: str) -> None:
 
 
 def add_permanent_ignore(agent_id: int, ip: str, actor: str, comment: str = "") -> None:
-    validate_ipv4(ip)
+    validate_ip_or_network(ip)
     db.add_permanent_ignore(agent_id, ip, actor, comment)
     sync_permanent_ignore(agent_id, actor)
     db.log_action(actor, agent_id, "permanent_ignore_add", ip=ip, detail=comment)
+
+
+def add_permanent_ignore_bulk(agent_id: int, entries: list[str], actor: str, comment: str = "") -> list[str]:
+    """Как add_permanent_ignore, но для нескольких IP/сетей разом — один sync в конце,
+    а не по одному на каждую запись. Возвращает те, что не прошли валидацию (не роняет
+    весь список из-за одной опечатки)."""
+    bad = []
+    added_any = False
+    for entry in entries:
+        try:
+            validate_ip_or_network(entry)
+        except ValueError:
+            bad.append(entry)
+            continue
+        db.add_permanent_ignore(agent_id, entry, actor, comment)
+        added_any = True
+    if added_any:
+        sync_permanent_ignore(agent_id, actor)
+        db.log_action(actor, agent_id, "permanent_ignore_add_bulk", detail=f"{len(entries) - len(bad)} записей")
+    return bad
 
 
 def remove_permanent_ignore(agent_id: int, ip: str, actor: str) -> None:

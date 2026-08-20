@@ -133,6 +133,9 @@
   <form method="post" action="{{ url_for('agent_ban_forever', agent_id=agent['id']) }}" style="margin-top:0.5rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input name="ip" placeholder="1.2.3.4" required>
+    <label class="muted" style="display:inline-flex;align-items:center;gap:0.3rem">
+      <input type="checkbox" name="everywhere" value="1"> сразу на все агенты
+    </label>
     <button type="submit">Забанить навсегда</button>
   </form>
 </div>
@@ -173,8 +176,15 @@
 
 <h2>Постоянный игнор</h2>
 <div class="panel">
+  {% if agent['baseline_ignoreip'] %}
+  <p class="muted" style="margin-top:0">
+    Базовый ignoreip хоста (из <code>jail.local</code>, снят при последнем «Запросить полное
+    состояние») — редактируется на самом хосте, здесь только для справки:<br>
+    {% for ip in agent['baseline_ignoreip'] %}<code>{{ ip }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
   <table>
-    <tr><th>IP</th><th>кем</th><th>комментарий</th>{% if current_role == 'admin' %}<th></th>{% endif %}</tr>
+    <tr><th>IP/сеть</th><th>кем</th><th>комментарий</th>{% if current_role == 'admin' %}<th></th>{% endif %}</tr>
     {% for r in permanent_ignore %}
     <tr>
       <td>{{ r['ip'] }}</td><td class="muted">{{ r['created_by'] }}</td><td class="muted">{{ r['comment'] or '' }}</td>
@@ -189,14 +199,20 @@
       {% endif %}
     </tr>
     {% else %}
-    <tr><td colspan="4" class="muted">нет записей</td></tr>
+    <tr><td colspan="4" class="muted">нет записей, добавленных через панель</td></tr>
     {% endfor %}
   </table>
   {% if current_role == 'admin' %}
-  <form method="post" action="{{ url_for('agent_permanent_ignore_add', agent_id=agent['id']) }}" style="margin-top:0.6rem;">
+  <form method="post" action="{{ url_for('agent_permanent_ignore_add', agent_id=agent['id']) }}"
+        enctype="multipart/form-data" style="margin-top:0.6rem;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input name="ip" placeholder="1.2.3.4" required>
-    <input name="comment" placeholder="комментарий">
+    <p style="margin:0 0 0.4rem"><label>IP и/или сети (CIDR), через запятую, пробел или по одной в строке<br>
+      <textarea name="ips" rows="3" style="width:100%" placeholder="1.2.3.4, 10.0.0.0/24&#10;5.6.7.8"></textarea>
+    </label></p>
+    <p style="margin:0 0 0.4rem"><label>...или файл со списком (та же логика разбора)<br>
+      <input type="file" name="ips_file">
+    </label></p>
+    <input name="comment" placeholder="комментарий (общий для всех записей в этой отправке)" style="width:100%;margin-bottom:0.4rem">
     <button type="submit">Добавить</button>
   </form>
   {% endif %}
