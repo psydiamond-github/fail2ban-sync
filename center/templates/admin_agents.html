@@ -9,9 +9,7 @@
     {% for a in agents %}
     <tr>
       <td><a href="{{ url_for('agent_detail', agent_id=a['id']) }}">{{ a['name'] }}</a></td>
-      <td class="muted">
-        {% for g in groups %}{% if g['id'] == a['group_id'] %}{{ g['name'] }}{% endif %}{% endfor %}
-      </td>
+      <td class="muted">{{ group_path_by_agent.get(a['id'], '—') }}</td>
       <td>{% if a['revoked_at'] %}<span class="badge error">отозван</span>{% else %}<span class="badge done">активен</span>{% endif %}</td>
       <td>
         <a class="btn secondary" href="{{ url_for('admin_agent_edit', agent_id=a['id']) }}">изменить</a>
@@ -46,7 +44,7 @@
     <p><label>Группа<br>
       <select name="group_id">
         <option value="">— без группы —</option>
-        {% for g in groups %}<option value="{{ g['id'] }}">{{ g['name'] }}</option>{% endfor %}
+        {% for c in group_choices %}<option value="{{ c.id }}">{{ c.path }}</option>{% endfor %}
       </select>
     </label></p>
     <p><label>Разрешённые джейлы (по одному на строку, «имя bantime_секунд», -1 = навсегда;

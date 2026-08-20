@@ -59,12 +59,80 @@ def create_app() -> Flask:
 
     @app.context_processor
     def inject_globals():
+        nav_tree = {"groups": [], "agents": []}
+        nav_active_chain = []
+        if auth.current_username():
+            nav_tree, nav_active_chain = _build_nav_tree()
         return {
             "csrf_token": auth.csrf_token,
             "current_username": auth.current_username(),
             "current_role": auth.current_role(),
-            "nav_groups": db.list_groups(),
+            "nav_tree": nav_tree,
+            "nav_active_chain": nav_active_chain,
+            "current_agent_id": request.view_args.get("agent_id") if request.view_args else None,
         }
+
+    def _build_nav_tree():
+        """Дерево навигации: {"groups": [{"id","name","children": {...}}], "agents": [...]},
+        группы верхнего уровня и агенты вне групп — в одном узле (parent_id/group_id=None).
+        Возвращает (tree, active_chain) — путь id-групп до текущего открытого агента."""
+        groups = db.list_groups()
+        groups_by_id = {g["id"]: g for g in groups}
+        children_by_parent: dict = {}
+        for g in groups:
+            children_by_parent.setdefault(g["parent_id"], []).append(g)
+        for lst in children_by_parent.values():
+            lst.sort(key=lambda g: g["name"].lower())
+
+        agents = db.list_agents()
+        agents_by_group: dict = {}
+        for a in agents:
+            agents_by_group.setdefault(a["group_id"], []).append(a)
+        for lst in agents_by_group.values():
+            lst.sort(key=lambda a: a["name"].lower())
+
+        def build(parent_id):
+            return {
+                "groups": [
+                    {"id": g["id"], "name": g["name"], "children": build(g["id"])}
+                    for g in children_by_parent.get(parent_id, [])
+                ],
+                "agents": [{"id": a["id"], "name": a["name"]} for a in agents_by_group.get(parent_id, [])],
+            }
+
+        tree = build(None)
+
+        active_chain = []
+        cur_agent_id = request.view_args.get("agent_id") if request.view_args else None
+        if cur_agent_id is not None:
+            agent = db.get_agent(cur_agent_id)
+            gid = agent["group_id"] if agent else None
+            while gid is not None:
+                active_chain.append(gid)
+                g = groups_by_id.get(gid)
+                gid = g["parent_id"] if g else None
+            active_chain.reverse()
+        return tree, active_chain
+
+    def _group_path(gid, groups_by_id):
+        parts = []
+        while gid is not None:
+            g = groups_by_id.get(gid)
+            if not g:
+                break
+            parts.append(g["name"])
+            gid = g["parent_id"]
+        return " / ".join(reversed(parts))
+
+    def _group_choices():
+        """(список {"id","path"} для <select>, отсортированный по пути; groups_by_id)."""
+        groups = db.list_groups()
+        groups_by_id = {g["id"]: g for g in groups}
+        choices = sorted(
+            ({"id": g["id"], "path": _group_path(g["id"], groups_by_id)} for g in groups),
+            key=lambda c: c["path"].lower(),
+        )
+        return choices, groups_by_id
 
     # === Аутентификация =====================================================================
 
@@ -102,12 +170,12 @@ def create_app() -> Flask:
     @app.route("/dashboard")
     @auth.require_login
     def dashboard():
-        group_id = request.args.get("group", type=int)
-        agents = db.list_agents(group_id=group_id)
-        group_names = {g["id"]: g["name"] for g in db.list_groups()}
-        return render_template(
-            "dashboard.html", agents=agents, group_id=group_id, group_names=group_names
-        )
+        agents = db.list_agents()
+        groups_by_id = {g["id"]: g for g in db.list_groups()}
+        group_path_by_agent = {
+            a["id"]: _group_path(a["group_id"], groups_by_id) for a in agents if a["group_id"] is not None
+        }
+        return render_template("dashboard.html", agents=agents, group_path_by_agent=group_path_by_agent)
 
     @app.route("/agents/<int:agent_id>")
     @auth.require_login
@@ -272,7 +340,14 @@ def create_app() -> Flask:
     @app.route("/admin/agents")
     @auth.require_admin
     def admin_agents():
-        return render_template("admin_agents.html", agents=db.list_agents(), groups=db.list_groups())
+        agents = db.list_agents()
+        group_choices, groups_by_id = _group_choices()
+        group_path_by_agent = {
+            a["id"]: _group_path(a["group_id"], groups_by_id) for a in agents if a["group_id"] is not None
+        }
+        return render_template(
+            "admin_agents.html", agents=agents, group_choices=group_choices, group_path_by_agent=group_path_by_agent
+        )
 
     @app.route("/admin/agents/add", methods=["POST"])
     @auth.require_admin
@@ -332,8 +407,9 @@ def create_app() -> Flask:
             db.log_action(_actor(), agent_id, "agent_edited")
             flash("Агент обновлён.", "ok")
             return redirect(url_for("admin_agent_edit", agent_id=agent_id))
+        group_choices, _ = _group_choices()
         return render_template(
-            "admin_agent_edit.html", agent=agent, groups=db.list_groups(),
+            "admin_agent_edit.html", agent=agent, group_choices=group_choices,
             vpn_enabled=vpn.is_enabled(), vpn_peer=vpn.get_peer(agent_id),
             vpn_center_pubkey=db.get_setting("vpn_pubkey"),
             vpn_endpoint=f"{db.get_setting('vpn_endpoint_host')}:{db.get_setting('vpn_listen_port')}",
@@ -404,7 +480,11 @@ def create_app() -> Flask:
     @app.route("/admin/groups")
     @auth.require_admin
     def admin_groups():
-        return render_template("admin_groups.html", groups=db.list_groups())
+        group_choices, groups_by_id = _group_choices()
+        tree, _ = _build_nav_tree()
+        return render_template(
+            "admin_groups.html", tree=tree, group_choices=group_choices, groups_by_id=groups_by_id
+        )
 
     @app.route("/admin/groups/add", methods=["POST"])
     @auth.require_admin

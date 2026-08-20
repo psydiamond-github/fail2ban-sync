@@ -8,8 +8,8 @@
     <p><label>Группа<br>
       <select name="group_id">
         <option value="">— без группы —</option>
-        {% for g in groups %}
-        <option value="{{ g['id'] }}" {% if g['id'] == agent['group_id'] %}selected{% endif %}>{{ g['name'] }}</option>
+        {% for c in group_choices %}
+        <option value="{{ c.id }}" {% if c.id == agent['group_id'] %}selected{% endif %}>{{ c.path }}</option>
         {% endfor %}
       </select>
     </label></p>

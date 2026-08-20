@@ -17,9 +17,19 @@
 </form>
 
 <h2>Баны по джейлам</h2>
+{% if not bans_by_jail %}
+<p class="muted">Джейлов нет.</p>
+{% else %}
+<div class="tabs" role="tablist">
+  {% for jail, rows in bans_by_jail.items() %}
+  <button type="button" class="tab-btn{% if loop.first %} active{% endif %}"
+          data-tab-target="jail-tab-{{ loop.index }}" role="tab">
+    {{ jail }} <span class="tab-count">{{ rows | length }}</span>
+  </button>
+  {% endfor %}
+</div>
 {% for jail, rows in bans_by_jail.items() %}
-<div class="panel">
-  <strong>{{ jail }}</strong> <span class="muted">— забанено: {{ rows | length }}</span>
+<div class="tab-panel{% if not loop.first %} hidden{% endif %}" id="jail-tab-{{ loop.index }}" role="tabpanel">
   <table>
     <tr><th>IP</th><th>с</th><th></th></tr>
     {% for r in rows %}
@@ -41,6 +51,22 @@
   </table>
 </div>
 {% endfor %}
+{% endif %}
+
+<script>
+(function () {
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var group = btn.closest('.tabs');
+      group.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      var target = document.getElementById(btn.dataset.tabTarget);
+      target.parentNode.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.add('hidden'); });
+      target.classList.remove('hidden');
+    });
+  });
+})();
+</script>
 
 {% if current_role == 'admin' %}
 <h2>Забанить</h2>

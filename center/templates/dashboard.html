@@ -3,30 +3,13 @@
 {% block content %}
 <h1>Агенты</h1>
 
-{% if nav_groups %}
-{% macro render_group(g, all_groups, depth) %}
-  <div style="margin-left:{{ depth * 1.2 }}rem;">
-    <a href="{{ url_for('dashboard', group=g['id']) }}" {% if group_id == g['id'] %}style="font-weight:700"{% endif %}>{{ g['name'] }}</a>
-  </div>
-  {% for child in all_groups if child['parent_id'] == g['id'] %}
-    {{ render_group(child, all_groups, depth + 1) }}
-  {% endfor %}
-{% endmacro %}
-<div class="groups-nav muted" style="margin-bottom:0.8rem;">
-  <div><a href="{{ url_for('dashboard') }}" {% if not group_id %}style="font-weight:700"{% endif %}>— все —</a></div>
-  {% for g in nav_groups if not g['parent_id'] %}
-    {{ render_group(g, nav_groups, 0) }}
-  {% endfor %}
-</div>
-{% endif %}
-
 <div class="panel">
   <table>
     <tr><th>Имя</th><th>Группа</th><th>Статус</th><th>Последний чекин</th><th>Джейлы</th><th></th></tr>
     {% for a in agents %}
     <tr>
       <td><a href="{{ url_for('agent_detail', agent_id=a['id']) }}">{{ a['name'] }}</a></td>
-      <td class="muted">{{ group_names.get(a['group_id'], '—') }}</td>
+      <td class="muted">{{ group_path_by_agent.get(a['id'], '—') }}</td>
       <td>
         {% if a['revoked_at'] %}<span class="badge error">отозван</span>
         {% elif not a['last_seen'] %}<span class="badge pending">ещё не подключался</span>

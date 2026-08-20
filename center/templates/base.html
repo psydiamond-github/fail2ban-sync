@@ -40,6 +40,80 @@
     localStorage.setItem("f2b-theme", next);
   }
 </script>
+{% if current_username and (nav_tree.groups or nav_tree.agents) %}
+  <div id="group-nav"></div>
+  <script id="group-nav-data" type="application/json">{{ nav_tree|tojson }}</script>
+  <script id="group-nav-active-chain" type="application/json">{{ nav_active_chain|tojson }}</script>
+  <script>
+  (function () {
+    var tree = JSON.parse(document.getElementById('group-nav-data').textContent);
+    var activeChain = JSON.parse(document.getElementById('group-nav-active-chain').textContent);
+    var currentAgentId = {{ current_agent_id|tojson }};
+    // url_for с agent_id=0 даёт корректный (с учётом возможного префикса прокси) базовый
+    // путь — достаточно отрезать завершающий "0" и подставлять id агента самим.
+    var agentUrlBase = {{ url_for('agent_detail', agent_id=0)|tojson }}.replace(/0$/, '');
+    var container = document.getElementById('group-nav');
+
+    function findGroup(node, id) {
+      for (var i = 0; i < node.groups.length; i++) {
+        if (node.groups[i].id === id) return node.groups[i];
+      }
+      return null;
+    }
+
+    function renderRow(node, depth) {
+      var row = document.createElement('div');
+      row.className = 'server-tabs group-nav-row';
+      row.dataset.depth = depth;
+
+      node.groups.forEach(function (g) {
+        var btn = document.createElement('a');
+        btn.href = '#';
+        btn.className = 'group-tab';
+        btn.textContent = '📁 ' + g.name;
+        btn.dataset.groupId = g.id;
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          row.querySelectorAll('.group-tab').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          container.querySelectorAll('.group-nav-row').forEach(function (r) {
+            if (parseInt(r.dataset.depth, 10) > depth) r.remove();
+          });
+          var nextRow = renderRow(g.children, depth + 1);
+          if (nextRow.children.length) container.appendChild(nextRow);
+        });
+        row.appendChild(btn);
+      });
+
+      node.agents.forEach(function (a) {
+        var link = document.createElement('a');
+        link.href = agentUrlBase + a.id;
+        link.className = 'server-tab';
+        if (a.id === currentAgentId) link.classList.add('active');
+        link.textContent = a.name;
+        row.appendChild(link);
+      });
+
+      return row;
+    }
+
+    var node = tree, depth = 0;
+    container.appendChild(renderRow(node, 0));
+    activeChain.forEach(function (gid) {
+      var g = findGroup(node, gid);
+      if (!g) return;
+      var rowEl = container.querySelector('.group-nav-row[data-depth="' + depth + '"]');
+      var btn = rowEl && rowEl.querySelector('.group-tab[data-group-id="' + gid + '"]');
+      if (btn) btn.classList.add('active');
+      var nextRow = renderRow(g.children, depth + 1);
+      if (nextRow.children.length) container.appendChild(nextRow);
+      node = g.children;
+      depth++;
+    });
+  })();
+  </script>
+{% endif %}
+
 <main>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for category, message in messages %}

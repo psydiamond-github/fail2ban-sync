@@ -2,53 +2,73 @@
 {% block title %}Группы — fail2ban-center{% endblock %}
 {% block content %}
 <h1>Группы агентов</h1>
-<div class="panel">
-  <table>
-    <tr><th>Название</th><th>Родитель</th><th></th></tr>
-    {% for g in groups %}
-    <tr>
-      <td>
-        <form method="post" action="{{ url_for('admin_groups_rename', group_id=g['id']) }}" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <input name="name" value="{{ g['name'] }}" style="width:12rem">
-          <button type="submit" class="secondary">переим.</button>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="{{ url_for('admin_groups_move', group_id=g['id']) }}" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <select name="parent_id" onchange="this.form.submit()">
-            <option value="">— верхний уровень —</option>
-            {% for p in groups if p['id'] != g['id'] %}
-            <option value="{{ p['id'] }}" {% if p['id'] == g['parent_id'] %}selected{% endif %}>{{ p['name'] }}</option>
-            {% endfor %}
-          </select>
-        </form>
-      </td>
-      <td>
-        <form method="post" action="{{ url_for('admin_groups_delete', group_id=g['id']) }}" class="inline"
-              onsubmit="return confirm('Удалить группу «{{ g['name'] }}»?')">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="danger">удалить</button>
-        </form>
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="3" class="muted">групп нет</td></tr>
-    {% endfor %}
-  </table>
-</div>
+<p class="muted" style="margin-top:-.5rem">
+  Группы/подгруппы — только для навигации (вкладки выше и на этой странице), на работу
+  fail2ban никак не влияют. Вложенность произвольная: группа может содержать и подгруппы, и
+  агентов напрямую одновременно.
+</p>
 
-<h2>Добавить группу</h2>
+<h2>Создать группу</h2>
 <div class="panel">
   <form method="post" action="{{ url_for('admin_groups_add') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input name="name" placeholder="название" required>
     <select name="parent_id">
       <option value="">— верхний уровень —</option>
-      {% for g in groups %}<option value="{{ g['id'] }}">{{ g['name'] }}</option>{% endfor %}
+      {% for c in group_choices %}<option value="{{ c.id }}">{{ c.path }}</option>{% endfor %}
     </select>
     <button type="submit">Создать</button>
   </form>
+</div>
+
+<h2>Дерево</h2>
+<div class="panel">
+{% macro render_node(node, depth, current_group_id) %}
+  {% for g in node.groups %}
+    <div style="margin-left:{{ depth * 1.5 }}rem;padding:.5rem 0;border-top:1px solid var(--border)">
+      <strong>📁 {{ g.name }}</strong>
+
+      <form method="post" action="{{ url_for('admin_groups_rename', group_id=g.id) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="name" value="{{ g.name }}" style="width:9em">
+        <button type="submit" class="secondary">переименовать</button>
+      </form>
+
+      <form method="post" action="{{ url_for('admin_groups_move', group_id=g.id) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <select name="parent_id" onchange="this.form.submit()">
+          <option value="" {% if not groups_by_id[g.id]['parent_id'] %}selected{% endif %}>— верхний уровень —</option>
+          {% for c in group_choices %}
+            {% if c.id != g.id %}
+              <option value="{{ c.id }}" {% if groups_by_id[g.id]['parent_id'] == c.id %}selected{% endif %}>{{ c.path }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </form>
+
+      <form method="post" action="{{ url_for('admin_groups_delete', group_id=g.id) }}" class="inline"
+            onsubmit="return confirm('Удалить группу «{{ g.name }}»? Разрешено только для пустой группы (без подгрупп и агентов).');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="danger">удалить</button>
+      </form>
+    </div>
+    {{ render_node(g.children, depth + 1, g.id) }}
+  {% endfor %}
+
+  {% if depth == 0 and node.agents %}
+    <p class="muted" style="margin:.5rem 0 0">Без группы:</p>
+  {% endif %}
+  {% for a in node.agents %}
+    <div style="margin-left:{{ (depth + 1) * 1.5 }}rem;padding:.3rem 0;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+      <a href="{{ url_for('agent_detail', agent_id=a.id) }}">{{ a.name }}</a>
+    </div>
+  {% endfor %}
+
+  {% if not node.groups and not node.agents and depth == 0 %}
+    <p class="muted">Групп пока нет — создайте первую выше.</p>
+  {% endif %}
+{% endmacro %}
+
+{{ render_node(tree, 0, none) }}
 </div>
 {% endblock %}
