@@ -420,7 +420,9 @@ def refresh_tor_exit_nodes() -> int:
     url = db.get_setting("tor_block_source_url") or ""
     if not url:
         return 0
-    resp = requests.get(url, timeout=20)
+    proxy_url = db.get_setting("tor_block_proxy_url") or ""
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+    resp = requests.get(url, timeout=20, proxies=proxies)
     resp.raise_for_status()
     ips = []
     for line in resp.text.splitlines():

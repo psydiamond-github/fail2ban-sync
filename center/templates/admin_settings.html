@@ -40,6 +40,8 @@
       {% if settings.get('tor_block_enabled') == '1' %}checked{% endif %}> включён</label></p>
   <p><label>URL источника списка exit-нод<br>
     <input name="tor_block_source_url" value="{{ settings.get('tor_block_source_url', '') }}" style="width:100%"></label></p>
+  <p><label>Прокси для скачивания списка (пусто — напрямую), например <code>socks5h://127.0.0.1:30303</code><br>
+    <input name="tor_block_proxy_url" value="{{ settings.get('tor_block_proxy_url', '') }}" style="width:100%"></label></p>
 </div>
 
 <div class="panel">

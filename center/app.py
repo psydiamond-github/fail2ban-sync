@@ -746,7 +746,7 @@ def create_app() -> Flask:
                 "checkin_interval_seconds", "agent_task_stale_after_missed",
                 "session_idle_timeout_minutes", "global_block_threshold",
                 "global_block_duration_mode", "global_block_bulk_max_workers",
-                "tor_block_source_url",
+                "tor_block_source_url", "tor_block_proxy_url",
                 "log_view_mode", "fail2ban_log_lines", "local_log_max_bytes",
                 "graylog_url", "graylog_stream_id",
                 "graylog_default_range_hours", "graylog_default_log_lines",
