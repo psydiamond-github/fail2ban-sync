@@ -15,4 +15,8 @@ ExecStart=/usr/bin/python3 /opt/f2b-agent/f2b-agent-checkin.py
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/f2b-agent
+# /etc/fail2ban — сюда пишет sudo-эскалированный f2b-agent-helper (jail.d/filter.d
+# дропины для agent-permanent-ban/agent-tor-block); ProtectSystem=strict делает всю
+# ФС read-only для юнита включая дочерние root-процессы — это ограничение mount
+# namespace, sudo/root его не обходит, поэтому путь нужно разрешить явно.
+ReadWritePaths=/var/lib/f2b-agent /etc/fail2ban

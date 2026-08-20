@@ -118,13 +118,21 @@ cmd_sync_permanent() {
 
     ensure_noop_filter_content
 
+    # jail.d/*.local грузится fail2ban'ом ПОСЛЕ jail.local — пустой "ignoreip =" здесь
+    # безусловно перебивал бы уже настроенный на хосте базовый ignoreip из jail.local.
+    # Пишем строку [DEFAULT] только когда реально есть что переопределять; центр сам
+    # включает в этот список известный baseline (см. tasks.sync_permanent_ignore) —
+    # пусто здесь означает "постоянного игнора через центр ещё не добавляли", а не
+    # "снять весь ignoreip хоста".
+    local default_block=""
+    if [[ -n "$ignoreip_line" ]]; then
+        default_block=$'[DEFAULT]\nignoreip = '"$ignoreip_line"$'\n\n'
+    fi
+
     local jail_content
     jail_content=$(cat <<EOF
 # Установлено автоматически f2b-agent-helper.
-[DEFAULT]
-ignoreip = ${ignoreip_line}
-
-[${PERMANENT_JAIL}]
+${default_block}[${PERMANENT_JAIL}]
 enabled = true
 bantime = -1
 filter = f2b-agent-noop
