@@ -397,26 +397,17 @@ def create_app() -> Flask:
             return redirect(url_for("admin_agents"))
         name = request.form.get("name", "").strip()
         group_id = request.form.get("group_id", type=int) or None
-        jail_lines = request.form.get("allowed_jails", "")
-        jails = []
-        for line in jail_lines.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            jail_name = parts[0]
-            bantime = int(parts[1]) if len(parts) > 1 else 600
-            jails.append({"name": jail_name, "bantime": bantime})
         if not name:
             flash("Имя агента обязательно.", "error")
             return redirect(url_for("admin_agents"))
-        agent_id, token = db.register_agent(name, jails, group_id=group_id)
+        # Джейлы не спрашиваем — install_agent.sh и обычный чекин сами находят их
+        # на хосте (fail2ban-client status) и добавляют сюда без ручного ввода.
+        agent_id, token = db.register_agent(name, [], group_id=group_id)
         db.log_action(_actor(), agent_id, "agent_registered")
-        jail_flags = "".join(f" --jail {j['name']}:{j['bantime']}" for j in jails)
         flash(
             f"Агент «{name}» создан. Токен (показывается один раз, сохраните сейчас): {token}. "
             f"Установка: sudo agent/install_agent.sh --center-url <URL> --token {token} "
-            f"--agent-name {name}{jail_flags}",
+            f"--agent-name {name} — джейлы хоста подтянутся сами при установке.",
             "ok",
         )
         return redirect(url_for("admin_agents"))

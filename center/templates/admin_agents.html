@@ -47,12 +47,13 @@
         {% for c in group_choices %}<option value="{{ c.id }}">{{ c.path }}</option>{% endfor %}
       </select>
     </label></p>
-    <p><label>Разрешённые джейлы (по одному на строку, «имя bantime_секунд», -1 = навсегда;
-       agent-permanent-ban добавляется автоматически)<br>
-      <textarea name="allowed_jails" rows="4" style="width:100%" placeholder="sshd 600&#10;nginx-req-limit 3600"></textarea>
-    </label></p>
     <button type="submit">Создать</button>
   </form>
-  <p class="muted">Токен показывается один раз сразу после создания — сохраните его для install-скрипта агента.</p>
+  <p class="muted">
+    Токен показывается один раз сразу после создания — сохраните его для install-скрипта агента.
+    Джейлы указывать не нужно — install_agent.sh сам находит их на хосте
+    (<code>fail2ban-client status</code>) при установке, а обычный чекин дальше держит список
+    актуальным.
+  </p>
 </div>
 {% endblock %}
