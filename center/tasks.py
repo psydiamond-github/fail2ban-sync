@@ -79,6 +79,10 @@ def process_checkin(agent: dict[str, Any], body: dict[str, Any], remote_ip: str)
     _check_rate_anomaly(agent)
     db.touch_agent_checkin(agent["id"], remote_ip, body.get("agent_version"))
 
+    discovered_jails = body.get("discovered_jails") or []
+    if discovered_jails:
+        db.merge_agent_discovered_jails(agent["id"], discovered_jails)
+
     for result in body.get("results", []) or []:
         _apply_result(agent, result)
 

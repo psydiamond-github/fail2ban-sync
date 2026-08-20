@@ -20,7 +20,13 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.1.0"
+
+# Синтетические джейлы, которыми управляет сам центр (создаются helper'ом по требованию,
+# при первом бане через них) — не приходят из fail2ban-client status на пустом хосте, но
+# всегда должны быть доступны к исполнению (см. main()).
+PERMANENT_BAN_JAIL = "agent-permanent-ban"
+TOR_BLOCK_JAIL = "agent-tor-block"
 
 CONFIG_PATH = os.environ.get("F2B_AGENT_CONFIG", "/etc/f2b-agent/config.json")
 STATE_PATH = os.environ.get("F2B_AGENT_STATE", "/var/lib/f2b-agent/state.json")
@@ -45,9 +51,12 @@ def _now_iso() -> str:
 def load_config() -> dict[str, Any]:
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    for key in ("center_url", "token", "agent_name", "allowed_jails"):
+    for key in ("center_url", "token", "agent_name"):
         if key not in cfg:
             raise ValueError(f"в {CONFIG_PATH} отсутствует обязательное поле {key!r}")
+    # Устаревшее поле с ручной установки — теперь только дополняет автообнаружение
+    # (см. discover_jails() и main()), никогда не сужает его.
+    cfg.setdefault("allowed_jails", [])
     return cfg
 
 
@@ -99,6 +108,29 @@ def _parse_banip_with_time(output: str) -> list[dict[str, str]]:
         since = rest.split("+", 1)[0].strip() if "+" in rest else rest.strip()
         entries.append({"ip": ip, "since": since or _now_iso()})
     return entries
+
+
+def discover_jails() -> list[dict[str, Any]]:
+    """Живой список джейлов из локального fail2ban (имя + bantime), через
+    `f2b-agent-helper jails` (fail2ban-client status + get bantime на каждый). Это то, что
+    реально работает на хосте прямо сейчас — центр узнаёт о нём сам, без ручного ввода."""
+    rc, out, err = run_helper("jails")
+    if rc != 0:
+        log.warning("jails: %s", err.strip())
+        return []
+    discovered = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        name = parts[0]
+        try:
+            bantime = int(parts[1]) if len(parts) > 1 else 600
+        except ValueError:
+            bantime = 600
+        discovered.append({"name": name, "bantime": bantime})
+    return discovered
 
 
 def ensure_notify_actions(allowed_jails: list[dict[str, Any]]) -> None:
@@ -230,11 +262,23 @@ def checkin(config: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     config = load_config()
-    allowed_jail_names = {j["name"] for j in config["allowed_jails"]}
+    discovered = discover_jails()
+    discovered_names = {j["name"] for j in discovered}
+    configured_names = {j["name"] for j in config["allowed_jails"]}
+    # allowed_jails в конфиге больше не сужает автообнаружение — только дополняет его
+    # (существующие конфиги с одним-двумя джейлами, оставшиеся от ручной установки, не
+    # должны молча блокировать все остальные реальные джейлы хоста). Синтетические джейлы
+    # разрешены всегда: их создаёт сам helper по требованию (первый ban-forever/tor-sync),
+    # до этого их нет в live-статусе fail2ban.
+    effective_names = discovered_names | configured_names | {PERMANENT_BAN_JAIL, TOR_BLOCK_JAIL}
+    bantime_by_name = {j["name"]: j["bantime"] for j in discovered}
+    effective_jails = [{"name": n, "bantime": bantime_by_name.get(n, 600)} for n in effective_names]
+    allowed_jail_names = effective_names
+
     state = load_state()
 
-    ensure_notify_actions(config["allowed_jails"])
-    current_bans = query_current_bans(config["allowed_jails"])
+    ensure_notify_actions(effective_jails)
+    current_bans = query_current_bans(effective_jails)
     new_bans, new_unbans = diff_bans(state.get("last_bans", {}), current_bans)
     log_offset = state.get("log_offset", 0)
     log_tail = fetch_log_tail(log_offset)
@@ -246,6 +290,7 @@ def main() -> int:
         "new_bans": new_bans,
         "new_unbans": new_unbans,
         "log_tail": log_tail,
+        "discovered_jails": discovered,
     }
 
     try:

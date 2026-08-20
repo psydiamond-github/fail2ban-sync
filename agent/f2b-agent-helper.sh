@@ -212,7 +212,22 @@ cmd_ensure_notify_action() {
 }
 
 cmd_ping() { fail2ban-client ping; }
-cmd_jails() { fail2ban-client status; }
+
+# Живой список джейлов этого хоста — "имя bantime" построчно, синтетические
+# agent-permanent-ban/agent-tor-block исключены (ими управляет сам центр отдельно).
+# Источник правды для автообнаружения на стороне f2b-agent-checkin.py.
+cmd_jails() {
+    local raw name bt
+    raw=$(fail2ban-client status)
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        [[ "$name" == "$PERMANENT_JAIL" || "$name" == "$TOR_JAIL" ]] && continue
+        [[ "$name" =~ $JAIL_RE ]] || continue
+        bt=$(fail2ban-client get "$name" bantime 2>/dev/null)
+        [[ "$bt" =~ ^-?[0-9]+$ ]] || bt=600
+        echo "$name $bt"
+    done < <(printf '%s\n' "$raw" | sed -n 's/^.*Jail list:[[:space:]]*//p' | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+}
 
 cmd_jail_bans() {
     require_jail "$1"

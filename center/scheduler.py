@@ -46,10 +46,15 @@ def _tick() -> None:
 
     try:
         if db.get_setting("tor_block_enabled", "0") == "1" and _tor_refresh_due():
-            count = tasks.refresh_tor_exit_nodes()
-            db.set_setting("tor_block_last_refresh_at", db.now())
-            logger.info("Tor exit-nodes обновлены: %d адресов", count)
-            tasks.sync_tor_block_all_agents()
+            # Метка времени пишется даже при неудаче (сеть недоступна и т.п.) — иначе
+            # _tor_refresh_due() остаётся True вечно и следующий тик долбит источник снова
+            # уже через 30с вместо суток, съедая на каждом тике до requests-таймаута.
+            try:
+                count = tasks.refresh_tor_exit_nodes()
+                logger.info("Tor exit-nodes обновлены: %d адресов", count)
+                tasks.sync_tor_block_all_agents()
+            finally:
+                db.set_setting("tor_block_last_refresh_at", db.now())
     except Exception:
         logger.exception("обновление/синхронизация Tor-бана упала")
 

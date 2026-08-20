@@ -179,7 +179,9 @@ def register_agent(
     graylog_source: Optional[str] = None,
 ) -> tuple[int, str]:
     """Возвращает (id, raw_token) — токен отдаётся только сейчас, в БД остаётся лишь хэш."""
-    jails = list(allowed_jails) + [{"name": PERMANENT_BAN_JAIL, "bantime": -1}]
+    jails = list(allowed_jails)
+    if not any(j.get("name") == PERMANENT_BAN_JAIL for j in jails):
+        jails.append({"name": PERMANENT_BAN_JAIL, "bantime": -1})
     token = secrets.token_hex(32)
     token_hash = _hash_token(load_secret_key(), token)
     with closing(get_conn()) as conn:
@@ -284,6 +286,24 @@ def set_agent_allowed_jails(agent_id: int, jails: list[dict[str, Any]]) -> None:
     with closing(get_conn()) as conn:
         conn.execute("UPDATE agents SET allowed_jails = ? WHERE id = ?", (_dumps(jails), agent_id))
         conn.commit()
+
+
+def merge_agent_discovered_jails(agent_id: int, discovered: list[dict[str, Any]]) -> None:
+    """Добавляет в allowed_jails агента джейлы, которые он сам обнаружил через
+    fail2ban-client status на чекине и которых там ещё нет (по имени) — только добавляет,
+    bantime уже известных джейлов не трогает (админ мог задать его вручную)."""
+    agent = get_agent(agent_id)
+    if agent is None:
+        return
+    existing_names = {j["name"] for j in agent["allowed_jails"]}
+    new_jails = [
+        {"name": j["name"], "bantime": j.get("bantime", 600)}
+        for j in discovered
+        if j.get("name") and j["name"] not in existing_names
+    ]
+    if not new_jails:
+        return
+    set_agent_allowed_jails(agent_id, list(agent["allowed_jails"]) + new_jails)
 
 
 def set_agent_group(agent_id: int, group_id: Optional[int]) -> None:
