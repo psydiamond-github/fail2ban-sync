@@ -15,6 +15,10 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button type="submit" class="secondary">Запросить полное состояние</button>
 </form>
+<form method="post" action="{{ url_for('agent_resync_jails', agent_id=agent['id']) }}" class="inline">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="secondary" title="Добавит новые джейлы хоста и уберёт те, которых на нём больше нет">Пересинхронизировать джейлы</button>
+</form>
 
 <h2>Баны по джейлам / Лог</h2>
 <div class="tabs" role="tablist">

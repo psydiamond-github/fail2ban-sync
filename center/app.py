@@ -346,6 +346,21 @@ def create_app() -> Flask:
         flash("Запрос полного состояния поставлен в очередь.", "ok")
         return redirect(url_for("agent_detail", agent_id=agent_id))
 
+    @app.route("/agents/<int:agent_id>/resync-jails", methods=["POST"])
+    @auth.require_login
+    def agent_resync_jails(agent_id):
+        if not auth.check_csrf(request.form):
+            auth.flash_csrf_error()
+            return redirect(url_for("agent_detail", agent_id=agent_id))
+        _agent_or_404(agent_id)
+        db.mark_jail_resync(agent_id)
+        db.log_action(_actor(), agent_id, "jail_resync_requested")
+        flash(
+            "Пересинхронизация джейлов запрошена — применится на следующем чекине агента "
+            "(добавит новые, уберёт те, которых на хосте больше нет).", "ok",
+        )
+        return redirect(url_for("agent_detail", agent_id=agent_id))
+
     # === Администрирование агентов ============================================================
 
     @app.route("/admin/agents")

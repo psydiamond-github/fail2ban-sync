@@ -81,7 +81,10 @@ def process_checkin(agent: dict[str, Any], body: dict[str, Any], remote_ip: str)
 
     discovered_jails = body.get("discovered_jails") or []
     if discovered_jails:
-        db.merge_agent_discovered_jails(agent["id"], discovered_jails)
+        if db.pop_jail_resync_pending(agent["id"]):
+            db.reconcile_agent_jails(agent["id"], discovered_jails)
+        else:
+            db.merge_agent_discovered_jails(agent["id"], discovered_jails)
 
     for result in body.get("results", []) or []:
         _apply_result(agent, result)

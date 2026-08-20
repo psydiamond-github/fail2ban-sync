@@ -306,6 +306,40 @@ def merge_agent_discovered_jails(agent_id: int, discovered: list[dict[str, Any]]
     set_agent_allowed_jails(agent_id, list(agent["allowed_jails"]) + new_jails)
 
 
+def reconcile_agent_jails(agent_id: int, discovered: list[dict[str, Any]]) -> None:
+    """Как merge_agent_discovered_jails, но ещё и убирает из allowed_jails джейлы, которых
+    в discovered больше нет (кроме синтетических agent-permanent-ban/agent-tor-block —
+    ими управляет сам центр, их в discovered никогда не бывает по дизайну helper'а).
+    Только по явному запросу (см. mark_jail_resync/pop_jail_resync) — обычный чекин
+    делает исключительно merge, чтобы разовый сбой автообнаружения не сносил джейл molча."""
+    agent = get_agent(agent_id)
+    if agent is None:
+        return
+    discovered_names = {j["name"] for j in discovered if j.get("name")}
+    kept = [
+        j for j in agent["allowed_jails"]
+        if j["name"] in discovered_names or j["name"] in (PERMANENT_BAN_JAIL, TOR_BLOCK_JAIL)
+    ]
+    kept_names = {j["name"] for j in kept}
+    new_jails = [
+        {"name": j["name"], "bantime": j.get("bantime", 600)}
+        for j in discovered if j["name"] not in kept_names
+    ]
+    set_agent_allowed_jails(agent_id, kept + new_jails)
+
+
+def mark_jail_resync(agent_id: int) -> None:
+    set_setting(f"jail_resync_pending:{agent_id}", "1")
+
+
+def pop_jail_resync_pending(agent_id: int) -> bool:
+    """True и сбрасывает флаг, если для агента запрошена пересинхронизация джейлов."""
+    pending = get_setting(f"jail_resync_pending:{agent_id}") == "1"
+    if pending:
+        set_setting(f"jail_resync_pending:{agent_id}", "0")
+    return pending
+
+
 def set_agent_group(agent_id: int, group_id: Optional[int]) -> None:
     with closing(get_conn()) as conn:
         conn.execute("UPDATE agents SET group_id = ? WHERE id = ?", (group_id, agent_id))
