@@ -80,20 +80,47 @@ install -o root -g root -m 644 "$SCRIPT_DIR/f2b-agent-checkin.py" "$INSTALL_DIR/
 install -o root -g root -m 700 "$SCRIPT_DIR/f2b-agent-helper.sh" /usr/local/sbin/f2b-agent-helper
 install -o root -g root -m 700 "$SCRIPT_DIR/f2b-agent-notify.py" /usr/local/sbin/f2b-agent-notify
 
+echo "==== Автообнаружение джейлов текущего fail2ban ===="
+# То же самое, что f2b-agent-checkin.py делает на каждом чекине (см. discover_jails()) —
+# запускаем и здесь тоже, чтобы config.json сразу отражал реальные джейлы хоста, а не
+# ждал первого успешного чекина. Мы уже root — helper вызываем напрямую, без sudo.
+DISCOVERED_JAILS=()
+if /usr/local/sbin/f2b-agent-helper jails >/tmp/.f2b-agent-jails.$$ 2>/dev/null; then
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        DISCOVERED_JAILS+=("${line// /:}")
+    done < /tmp/.f2b-agent-jails.$$
+    echo "найдено: ${DISCOVERED_JAILS[*]:-(нет)}"
+else
+    echo "автообнаружение не удалось (fail2ban не отвечает?) — довыполнится на первом чекине."
+fi
+rm -f /tmp/.f2b-agent-jails.$$
+
 echo "==== Конфигурация ($CONFIG_DIR/config.json) ===="
 {
-    python3 - "$CENTER_URL" "$TOKEN" "$AGENT_NAME" "${JAILS[@]:-}" <<'PYEOF'
+    python3 - "$CENTER_URL" "$TOKEN" "$AGENT_NAME" "${JAILS[@]:-}" -- "${DISCOVERED_JAILS[@]:-}" <<'PYEOF'
 import json
 import sys
 
 center_url, token, agent_name = sys.argv[1], sys.argv[2], sys.argv[3]
+rest = sys.argv[4:]
+sep = rest.index("--")
+explicit, discovered = rest[:sep], rest[sep + 1:]
+
+seen = set()
 jails = []
-for spec in sys.argv[4:]:
+# --jail с командной строки имеет приоритет над тем, что само нашлось на хосте —
+# позволяет сознательно переопределить bantime для конкретного джейла.
+for spec in explicit + discovered:
     if not spec:
         continue
     name, _, bantime = spec.partition(":")
+    if name in seen:
+        continue
+    seen.add(name)
     jails.append({"name": name, "bantime": int(bantime) if bantime else 600})
-jails.append({"name": "agent-permanent-ban", "bantime": -1})
+if "agent-permanent-ban" not in seen:
+    jails.append({"name": "agent-permanent-ban", "bantime": -1})
 
 print(json.dumps({
     "center_url": center_url,
@@ -120,6 +147,18 @@ if sudo -u "$AGENT_USER" sudo -n /usr/local/sbin/f2b-agent-helper ensure-permane
 else
     echo "ОШИБКА: $AGENT_USER не может выполнить f2b-agent-helper через sudo — проверьте sudoers." >&2
     exit 1
+fi
+
+echo "==== Перенос текущего ignoreip хоста (jail.local) в постоянный игнор агента ===="
+# jail.d/*.local (наш agent-permanent-ban) грузится fail2ban'ом ПОСЛЕ jail.local — если
+# сейчас же не перенести туда то, что уже настроено на хосте, окно до первого успешного
+# report_full_state/permanent_ignore_sync с центра осталось бы без этой защиты.
+current_ignoreip=$(sudo -u "$AGENT_USER" sudo -n /usr/local/sbin/f2b-agent-helper jail-local-ignoreip)
+if [[ -n "$current_ignoreip" ]]; then
+    printf '%s\n' $current_ignoreip | sudo -u "$AGENT_USER" sudo -n /usr/local/sbin/f2b-agent-helper sync-permanent >/dev/null
+    echo "OK — перенесено: $current_ignoreip"
+else
+    echo "в jail.local ignoreip не задан — переносить нечего."
 fi
 
 echo "==== systemd: timer + service ===="
