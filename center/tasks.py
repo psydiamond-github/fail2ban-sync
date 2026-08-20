@@ -416,16 +416,9 @@ def request_ping(agent_id: int, actor: str = "system") -> None:
 
 # === Бан сети Tor ==============================================================================
 
-def refresh_tor_exit_nodes() -> int:
-    url = db.get_setting("tor_block_source_url") or ""
-    if not url:
-        return 0
-    proxy_url = db.get_setting("tor_block_proxy_url") or ""
-    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
-    resp = requests.get(url, timeout=20, proxies=proxies)
-    resp.raise_for_status()
+def _parse_ipv4_lines(text: str) -> list[str]:
     ips = []
-    for line in resp.text.splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -434,6 +427,28 @@ def refresh_tor_exit_nodes() -> int:
         except ValueError:
             continue
         ips.append(line)
+    return ips
+
+
+def refresh_tor_exit_nodes() -> int:
+    """Источник — локальный файл (tor_block_source_path), если задан: не ходит в сеть
+    вообще, ожидает, что список туда кладёт что-то внешнее (cron/rsync и т.п.). Иначе —
+    HTTP(S) по tor_block_source_url, опционально через прокси (tor_block_proxy_url,
+    например socks5h://host:port — see check.torproject.org недоступен напрямую)."""
+    path = db.get_setting("tor_block_source_path") or ""
+    if path:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    else:
+        url = db.get_setting("tor_block_source_url") or ""
+        if not url:
+            return 0
+        proxy_url = db.get_setting("tor_block_proxy_url") or ""
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        resp = requests.get(url, timeout=20, proxies=proxies)
+        resp.raise_for_status()
+        text = resp.text
+    ips = _parse_ipv4_lines(text)
     db.replace_tor_exit_nodes(ips)
     return len(ips)
 

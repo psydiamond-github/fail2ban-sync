@@ -181,9 +181,17 @@ def create_app() -> Flask:
     @auth.require_login
     def agent_detail(agent_id):
         agent = _agent_or_404(agent_id)
+        # Джейлы вроде agent-tor-block/recidive легко разрастаются до тысяч записей —
+        # рендерить их все inline раздувало страницу до мегабайт и вешало браузер;
+        # показываем последние BANS_PER_JAIL_LIMIT, остальное — только счётчиком в табе.
+        BANS_PER_JAIL_LIMIT = 200
         bans_by_jail: dict[str, list] = {j["name"]: [] for j in agent["allowed_jails"]}
+        bans_total_by_jail: dict[str, int] = {j["name"]: 0 for j in agent["allowed_jails"]}
         for row in db.list_ban_state(agent_id):
-            bans_by_jail.setdefault(row["jail"], []).append(dict(row))
+            bans_by_jail.setdefault(row["jail"], [])
+            bans_total_by_jail[row["jail"]] = bans_total_by_jail.get(row["jail"], 0) + 1
+            if len(bans_by_jail[row["jail"]]) < BANS_PER_JAIL_LIMIT:
+                bans_by_jail[row["jail"]].append(dict(row))
         temp_ignore = db.list_temp_ignore(agent_id)
         permanent_ignore = db.list_permanent_ignore(agent_id)
         recent_tasks = db.list_tasks_for_agent(agent_id, limit=30)
@@ -195,26 +203,29 @@ def create_app() -> Flask:
         range_hours = request.args.get("range_hours", type=int) or int(
             db.get_setting("graylog_default_range_hours", "24") or "24"
         )
-        if request.args.get("tab") == "log":
-            if log_view_mode == "graylog":
-                source = agent.get("graylog_source") or agent["name"]
-                jail_filter = request.args.get("jail") or None
-                limit = int(db.get_setting("graylog_default_log_lines", "300") or "300") or 300
-                try:
-                    log_messages = graylog_client.search(
-                        source, jail=jail_filter, range_hours=range_hours, limit=limit
-                    )
-                except graylog_client.GraylogError as e:
-                    log_error = str(e)
-                log_link = graylog_client.deep_link(source, jail=jail_filter, range_hours=range_hours)
-            elif log_view_mode == "local":
-                lines = int(db.get_setting("fail2ban_log_lines", "300") or "300")
-                local_log_text = tasks.read_local_log(agent_id, max_lines=lines)
+        if log_view_mode == "local":
+            # Дёшево (локальный кэш-файл, не сеть) — рендерим сразу, вкладка переключается
+            # мгновенно на клиенте, без перезагрузки страницы (как вкладки джейлов).
+            lines = int(db.get_setting("fail2ban_log_lines", "300") or "300")
+            local_log_text = tasks.read_local_log(agent_id, max_lines=lines)
+        elif log_view_mode == "graylog" and request.args.get("tab") == "log":
+            # Graylog — живой запрос во внешнюю систему, оставляем по явному сабмиту формы.
+            source = agent.get("graylog_source") or agent["name"]
+            jail_filter = request.args.get("jail") or None
+            limit = int(db.get_setting("graylog_default_log_lines", "300") or "300") or 300
+            try:
+                log_messages = graylog_client.search(
+                    source, jail=jail_filter, range_hours=range_hours, limit=limit
+                )
+            except graylog_client.GraylogError as e:
+                log_error = str(e)
+            log_link = graylog_client.deep_link(source, jail=jail_filter, range_hours=range_hours)
 
         return render_template(
             "agent_detail.html",
             agent=agent,
             bans_by_jail=bans_by_jail,
+            bans_total_by_jail=bans_total_by_jail,
             temp_ignore=temp_ignore,
             permanent_ignore=permanent_ignore,
             recent_tasks=recent_tasks,
@@ -746,7 +757,7 @@ def create_app() -> Flask:
                 "checkin_interval_seconds", "agent_task_stale_after_missed",
                 "session_idle_timeout_minutes", "global_block_threshold",
                 "global_block_duration_mode", "global_block_bulk_max_workers",
-                "tor_block_source_url", "tor_block_proxy_url",
+                "tor_block_source_url", "tor_block_proxy_url", "tor_block_source_path",
                 "log_view_mode", "fail2ban_log_lines", "local_log_max_bytes",
                 "graylog_url", "graylog_stream_id",
                 "graylog_default_range_hours", "graylog_default_log_lines",

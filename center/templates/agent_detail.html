@@ -16,20 +16,24 @@
   <button type="submit" class="secondary">Запросить полное состояние</button>
 </form>
 
-<h2>Баны по джейлам</h2>
-{% if not bans_by_jail %}
-<p class="muted">Джейлов нет.</p>
-{% else %}
+<h2>Баны по джейлам / Лог</h2>
 <div class="tabs" role="tablist">
   {% for jail, rows in bans_by_jail.items() %}
   <button type="button" class="tab-btn{% if loop.first %} active{% endif %}"
           data-tab-target="jail-tab-{{ loop.index }}" role="tab">
-    {{ jail }} <span class="tab-count">{{ rows | length }}</span>
+    {{ jail }} <span class="tab-count">{{ bans_total_by_jail.get(jail, rows | length) }}</span>
   </button>
   {% endfor %}
+  <button type="button" class="tab-btn{% if not bans_by_jail %} active{% endif %}"
+          data-tab-target="log-tab" role="tab">Лог</button>
 </div>
 {% for jail, rows in bans_by_jail.items() %}
 <div class="tab-panel{% if not loop.first %} hidden{% endif %}" id="jail-tab-{{ loop.index }}" role="tabpanel">
+  {% set total = bans_total_by_jail.get(jail, rows | length) %}
+  {% if total > rows | length %}
+  <p class="muted">Показаны последние {{ rows | length }} из {{ total }} — остальные не выводятся,
+    чтобы не раздувать страницу (снять массовый бан можно через «Настройки», а не по одному).</p>
+  {% endif %}
   <table>
     <tr><th>IP</th><th>с</th><th></th></tr>
     {% for r in rows %}
@@ -51,7 +55,50 @@
   </table>
 </div>
 {% endfor %}
-{% endif %}
+<div class="tab-panel{% if bans_by_jail %} hidden{% endif %}" id="log-tab" role="tabpanel">
+  {% if log_view_mode == 'none' %}
+    <p class="muted">Просмотр логов выключен — включите в «Настройках» (локально на центре или через Graylog).</p>
+  {% elif log_view_mode == 'graylog' %}
+    {% if not graylog_configured %}
+      <p class="muted">Graylog не настроен — см. раздел «Настройки».</p>
+    {% else %}
+      <form method="get">
+        <input type="hidden" name="tab" value="log">
+        <input name="jail" placeholder="фильтр по джейлу (необязательно)" value="{{ request.args.get('jail', '') }}">
+        <select name="range_hours">
+          {% for h in [1, 6, 24, 72, 168] %}
+          <option value="{{ h }}" {% if h == range_hours %}selected{% endif %}>{{ h }} ч</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="secondary">Показать лог</button>
+        {% if log_link %}<a href="{{ log_link }}" target="_blank" class="muted">Открыть в Graylog →</a>{% endif %}
+      </form>
+      {% if log_error %}
+        <p class="flash error">{{ log_error }}</p>
+      {% elif request.args.get('tab') == 'log' %}
+        <table>
+          <tr><th>время</th><th>сообщение</th></tr>
+          {% for m in log_messages %}
+          <tr><td class="muted">{{ m['message']['timestamp'] }}</td><td>{{ m['message']['message'] }}</td></tr>
+          {% else %}
+          <tr><td colspan="2" class="muted">нет сообщений за выбранный период</td></tr>
+          {% endfor %}
+        </table>
+      {% endif %}
+    {% endif %}
+  {% elif log_view_mode == 'local' %}
+    <p class="muted">
+      Лог докачивается инкрементально самим агентом на каждом чекине (только новые строки),
+      хранится на диске центра. Новые строки сверху.
+      <a href="{{ url_for('agent_detail', agent_id=agent['id']) }}">Обновить →</a>
+    </p>
+    {% if local_log_text %}
+      <pre style="white-space:pre-wrap;word-break:break-all;">{{ local_log_text }}</pre>
+    {% else %}
+      <p class="muted">Пока пусто — появится после первого чекина агента.</p>
+    {% endif %}
+  {% endif %}
+</div>
 
 <script>
 (function () {
@@ -167,55 +214,5 @@
     <tr><td colspan="6" class="muted">нет задач</td></tr>
     {% endfor %}
   </table>
-</div>
-
-<h2>Лог</h2>
-<div class="panel">
-  {% if log_view_mode == 'none' %}
-    <p class="muted">Просмотр логов выключен — включите в «Настройках» (локально на центре или через Graylog).</p>
-  {% elif log_view_mode == 'graylog' %}
-    {% if not graylog_configured %}
-      <p class="muted">Graylog не настроен — см. раздел «Настройки».</p>
-    {% else %}
-      <form method="get">
-        <input type="hidden" name="tab" value="log">
-        <input name="jail" placeholder="фильтр по джейлу (необязательно)" value="{{ request.args.get('jail', '') }}">
-        <select name="range_hours">
-          {% for h in [1, 6, 24, 72, 168] %}
-          <option value="{{ h }}" {% if h == range_hours %}selected{% endif %}>{{ h }} ч</option>
-          {% endfor %}
-        </select>
-        <button type="submit" class="secondary">Показать лог</button>
-        {% if log_link %}<a href="{{ log_link }}" target="_blank" class="muted">Открыть в Graylog →</a>{% endif %}
-      </form>
-      {% if log_error %}
-        <p class="flash error">{{ log_error }}</p>
-      {% elif request.args.get('tab') == 'log' %}
-        <table>
-          <tr><th>время</th><th>сообщение</th></tr>
-          {% for m in log_messages %}
-          <tr><td class="muted">{{ m['message']['timestamp'] }}</td><td>{{ m['message']['message'] }}</td></tr>
-          {% else %}
-          <tr><td colspan="2" class="muted">нет сообщений за выбранный период</td></tr>
-          {% endfor %}
-        </table>
-      {% endif %}
-    {% endif %}
-  {% elif log_view_mode == 'local' %}
-    <p class="muted">
-      Лог докачивается инкрементально самим агентом на каждом чекине (только новые строки),
-      хранится на диске центра. Новые строки сверху.
-    </p>
-    <form method="get"><input type="hidden" name="tab" value="log">
-      <button type="submit" class="secondary">Обновить</button>
-    </form>
-    {% if request.args.get('tab') == 'log' %}
-      {% if local_log_text %}
-        <pre style="white-space:pre-wrap;word-break:break-all;">{{ local_log_text }}</pre>
-      {% else %}
-        <p class="muted">Пока пусто — появится после первого чекина агента.</p>
-      {% endif %}
-    {% endif %}
-  {% endif %}
 </div>
 {% endblock %}

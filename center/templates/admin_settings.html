@@ -38,9 +38,12 @@
   <h2 style="margin-top:0">Бан сети Tor</h2>
   <p><label><input type="checkbox" name="tor_block_enabled" value="1"
       {% if settings.get('tor_block_enabled') == '1' %}checked{% endif %}> включён</label></p>
-  <p><label>URL источника списка exit-нод<br>
+  <p><label>Путь к локальному файлу со списком exit-нод (если задан — читается он, в сеть центр
+     не ходит вообще; список туда кладёт что-то внешнее, например cron/rsync)<br>
+    <input name="tor_block_source_path" value="{{ settings.get('tor_block_source_path', '') }}" style="width:100%" placeholder="/opt/fail2ban-center/data/tor-exit-list.txt"></label></p>
+  <p><label>Иначе — URL источника (пусто выше обязательно, чтобы использовать)<br>
     <input name="tor_block_source_url" value="{{ settings.get('tor_block_source_url', '') }}" style="width:100%"></label></p>
-  <p><label>Прокси для скачивания списка (пусто — напрямую), например <code>socks5h://127.0.0.1:30303</code><br>
+  <p><label>Прокси для скачивания по URL (пусто — напрямую), например <code>socks5h://127.0.0.1:30303</code><br>
     <input name="tor_block_proxy_url" value="{{ settings.get('tor_block_proxy_url', '') }}" style="width:100%"></label></p>
 </div>
 
