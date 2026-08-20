@@ -460,6 +460,35 @@ def upsert_ban_state(agent_id: int, jail: str, ip: str, since: Optional[str]) ->
         conn.commit()
 
 
+def bulk_upsert_ban_state(agent_id: int, jail: str, ips: list[str]) -> None:
+    """Как upsert_ban_state, но одним соединением/коммитом на весь список — для больших
+    партий (например, разовое применение tor-block) один commit-с-fsync на N строк
+    ощутимо быстрее N отдельных."""
+    if not ips:
+        return
+    ts = now()
+    with closing(get_conn()) as conn:
+        conn.executemany(
+            """INSERT INTO agent_ban_state (agent_id, jail, ip, since, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(agent_id, jail, ip) DO UPDATE SET since = excluded.since,
+                   updated_at = excluded.updated_at""",
+            [(agent_id, jail, ip, ts, ts) for ip in ips],
+        )
+        conn.commit()
+
+
+def bulk_remove_ban_state(agent_id: int, jail: str, ips: list[str]) -> None:
+    if not ips:
+        return
+    with closing(get_conn()) as conn:
+        conn.executemany(
+            "DELETE FROM agent_ban_state WHERE agent_id = ? AND jail = ? AND ip = ?",
+            [(agent_id, jail, ip) for ip in ips],
+        )
+        conn.commit()
+
+
 def remove_ban_state(agent_id: int, jail: str, ip: str) -> None:
     with closing(get_conn()) as conn:
         conn.execute(

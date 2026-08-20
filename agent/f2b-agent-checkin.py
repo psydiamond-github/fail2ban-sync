@@ -31,7 +31,13 @@ TOR_BLOCK_JAIL = "agent-tor-block"
 CONFIG_PATH = os.environ.get("F2B_AGENT_CONFIG", "/etc/f2b-agent/config.json")
 STATE_PATH = os.environ.get("F2B_AGENT_STATE", "/var/lib/f2b-agent/state.json")
 HELPER_PATH = os.environ.get("F2B_AGENT_HELPER", "/usr/local/sbin/f2b-agent-helper")
-REQUEST_TIMEOUT = 15
+# Первый чекин, где джейл появляется с реальными данными (первый tor_sync, восстановление
+# после простоя и т.п.), может нести дифф в сотни-тысячи записей — центр пишет их по одной
+# (см. handle_new_ban), 15с хватало не всегда и роняло чекин в вечный повтор одного и того
+# же большого диффа (состояние не сохранялось, следующий запуск слал его заново). 120с —
+# с большим запасом даже для многотысячного диффа, при этом таймер тикает раз в минуту, так
+# что зависший процесс не накапливается.
+REQUEST_TIMEOUT = 120
 HELPER_TIMEOUT = 30
 
 logging.basicConfig(

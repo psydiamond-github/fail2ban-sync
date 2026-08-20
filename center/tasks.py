@@ -132,10 +132,24 @@ def _apply_result(agent: dict[str, Any], result: dict[str, Any]) -> None:
             if "baseline_ignoreip" in data:
                 db.set_agent_baseline_ignoreip(agent["id"], data["baseline_ignoreip"])
         elif task["type"] == "tor_sync":
+            ban_ips = task["payload"].get("ban_ips", [])
+            unban_ips = task["payload"].get("unban_ips", [])
             current = db.get_tor_applied(agent["id"])
-            current |= set(task["payload"].get("ban_ips", []))
-            current -= set(task["payload"].get("unban_ips", []))
+            current |= set(ban_ips)
+            current -= set(unban_ips)
             db.set_tor_applied(agent["id"], current)
+            # Иначе agent-tor-block не появляется в «Баны по джейлам» до следующего
+            # чекина — новый бан там иначе узнают только из диффа new_bans/new_unbans.
+            db.bulk_upsert_ban_state(agent["id"], db.TOR_BLOCK_JAIL, ban_ips)
+            db.bulk_remove_ban_state(agent["id"], db.TOR_BLOCK_JAIL, unban_ips)
+        elif task["type"] in ("ban", "unban"):
+            jail = task["payload"].get("jail")
+            ip = task["payload"].get("ip")
+            if jail and ip:
+                if task["type"] == "ban":
+                    db.upsert_ban_state(agent["id"], jail, ip, db.now())
+                else:
+                    db.remove_ban_state(agent["id"], jail, ip)
 
     db.log_action(
         f"agent:{agent['name']}", agent["id"], f"task_{status}",
