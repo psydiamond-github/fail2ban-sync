@@ -4,12 +4,19 @@
 #
 # Использование:
 #   sudo ./install_agent.sh --center-url https://center.example.org --token <TOKEN> \
-#       --agent-name srv-42 [--jail sshd:600 --jail nginx-req-limit:3600 ...]
+#       --agent-name srv-42 [--jail sshd:600 --jail nginx-req-limit:3600 ...] \
+#       [--center-ca-cert /путь/к/ca.crt]
 #
 # --center-url/--token/--agent-name — берутся из вывода "Добавить агента" в веб-интерфейсе
-# центра (или manage.py add-agent). --jail — ТЕ ЖЕ джейлы (имя:bantime_секунд, -1 — навсегда),
-# что были указаны при регистрации на центре — agent-permanent-ban добавляется автоматически
-# и здесь, и там, повторно указывать не нужно.
+# центра (или manage.py add-agent). --jail — не обязателен, джейлы центр находит сам (см.
+# README) — используйте, только если для конкретного джейла нужен другой bantime, чем
+# реально настроен на хосте.
+#
+# --center-ca-cert — для изолированной сети без публичного DNS-имени, если центр поднят с
+# собственным внутренним CA (см. ../center/deploy/generate-internal-ca.sh), а не с
+# сертификатом от публичного удостоверяющего центра (Let's Encrypt и т.п.) — добавляет
+# корневой CA в системное доверенное хранилище этого хоста, иначе HTTPS-чекин будет падать
+# с ошибкой проверки сертификата.
 
 set -euo pipefail
 
@@ -21,6 +28,7 @@ SETUP_VPN=0
 VPN_SERVER_PUBKEY=""
 VPN_SERVER_ENDPOINT=""
 VPN_ASSIGNED_IP=""
+CENTER_CA_CERT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,6 +40,7 @@ while [[ $# -gt 0 ]]; do
         --vpn-server-pubkey) VPN_SERVER_PUBKEY="$2"; shift 2 ;;
         --vpn-server-endpoint) VPN_SERVER_ENDPOINT="$2"; shift 2 ;;
         --vpn-assigned-ip) VPN_ASSIGNED_IP="$2"; shift 2 ;;
+        --center-ca-cert) CENTER_CA_CERT="$2"; shift 2 ;;
         *) echo "неизвестный аргумент: $1" >&2; exit 1 ;;
     esac
 done
@@ -41,12 +50,38 @@ done
     exit 1
 }
 [[ $EUID -eq 0 ]] || { echo "запустите через sudo/от root" >&2; exit 1; }
+if [[ -n "$CENTER_CA_CERT" ]]; then
+    [[ -f "$CENTER_CA_CERT" ]] || { echo "--center-ca-cert: файл не найден: $CENTER_CA_CERT" >&2; exit 1; }
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_USER="f2b-agent"
 INSTALL_DIR="/opt/f2b-agent"
 CONFIG_DIR="/etc/f2b-agent"
 STATE_DIR="/var/lib/f2b-agent"
+
+if [[ -n "$CENTER_CA_CERT" ]]; then
+    echo "==== Доверенный CA центра (изолированная сеть без публичного DNS) ===="
+    # Python-агент проверяет сертификат центра через системное доверенное хранилище
+    # (urllib.request/ssl без явного отключения verify) — значит CA должен попасть именно
+    # туда, а не просто лежать файлом на диске.
+    if command -v update-ca-trust >/dev/null 2>&1; then
+        install -o root -g root -m 644 "$CENTER_CA_CERT" \
+            /etc/pki/ca-trust/source/anchors/f2b-agent-center-ca.pem
+        update-ca-trust extract
+        echo "OK — добавлено в /etc/pki/ca-trust (update-ca-trust)."
+    elif command -v update-ca-certificates >/dev/null 2>&1; then
+        install -o root -g root -m 644 "$CENTER_CA_CERT" \
+            /usr/local/share/ca-certificates/f2b-agent-center-ca.crt
+        update-ca-certificates
+        echo "OK — добавлено в /usr/local/share/ca-certificates (update-ca-certificates)."
+    else
+        echo "ОШИБКА: не нашёл ни update-ca-trust, ни update-ca-certificates — добавьте" >&2
+        echo "  $CENTER_CA_CERT" >&2
+        echo "в доверенные CA этого дистрибутива вручную и перезапустите установку." >&2
+        exit 1
+    fi
+fi
 
 echo "==== Проверка fail2ban на этом хосте ===="
 if ! fail2ban-client ping >/dev/null 2>&1; then

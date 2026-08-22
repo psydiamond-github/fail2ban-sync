@@ -33,6 +33,13 @@ sudo ./install_agent.sh \
 приоритет над автообнаруженным; для джейлов, которых `--jail` не упомянул, работает
 автообнаружение как обычно.
 
+Если центр поднят со своим внутренним CA — изолированная сеть без публичного DNS-имени,
+сертификат не от Let's Encrypt (см. `../center/deploy/generate-internal-ca.sh`) — добавьте
+`--center-ca-cert /путь/к/ca.crt` (тот самый `ca.crt` из каталога, который сгенерировал этот
+скрипт на центре, не `server.crt`). Без этого HTTPS-чекин будет падать с ошибкой проверки
+сертификата — стандартная библиотека Python, которой пользуется агент, доверенные CA не
+угадывает, только системное хранилище.
+
 Скрипт:
 - создаёт системного пользователя `f2b-agent` (без шелла) — сам процесс агента непривилегирован;
 - кладёт `/usr/local/sbin/f2b-agent-helper` (root:root, chmod 700) и
@@ -79,6 +86,7 @@ sudo ./install_agent.sh \
 | `/etc/sudoers.d/f2b-agent` | root:root | 440 | NOPASSWD только на f2b-agent-helper |
 | `/opt/f2b-agent/f2b-agent-checkin.py` | root:root | 644 | сам чекин-скрипт |
 | `/var/lib/f2b-agent/state.json` | f2b-agent:f2b-agent | 600 | снимок банов + неотправленные результаты задач |
+| `/etc/pki/ca-trust/source/anchors/f2b-agent-center-ca.pem` (RHEL/REDOS) или `/usr/local/share/ca-certificates/f2b-agent-center-ca.crt` (Debian/Ubuntu) | root:root | 644 | только если ставили с `--center-ca-cert` — доверенный CA центра |
 
 Плюс два **runtime**-джейла (не персистентные конфиг-файлы, кроме `agent-permanent-ban`,
 которая всё же пишет один jail.d-файл — см. ниже): `agent-permanent-ban` (bantime=-1,
