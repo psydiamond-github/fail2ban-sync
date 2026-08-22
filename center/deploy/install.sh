@@ -43,10 +43,42 @@ cmd_install() {
 
     read -rp "Порт [8766]: " PORT
     PORT="${PORT:-8766}"
-    read -rp "Адрес для прослушивания gunicorn [127.0.0.1]: " BIND_ADDR
-    BIND_ADDR="${BIND_ADDR:-127.0.0.1}"
     read -rp "Системный пользователь сервиса [fail2ban-center]: " SERVICE_USER
     SERVICE_USER="${SERVICE_USER:-fail2ban-center}"
+
+    echo
+    echo "==== Сетевой адрес(а) для приёма подключений (агентов и/или браузера) ===="
+    echo "0) 127.0.0.1 — только локально (админ заходит через SSH-туннень, агенты — только"
+    echo "   с этого же хоста)"
+    IFACE_IPS=(); IFACE_NAMES=()
+    n=1
+    while read -r iface addr; do
+        [[ -z "$iface" ]] && continue
+        ip_only="${addr%/*}"
+        echo "$n) $ip_only  (интерфейс $iface)"
+        IFACE_IPS+=("$ip_only"); IFACE_NAMES+=("$iface")
+        n=$((n + 1))
+    done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}')
+    VPN_OPT=$n
+    echo "$n) Создать отдельную VPN-сеть для агентов (WireGuard-хаб) — если агентам не видна"
+    echo "   ни одна из сетей выше напрямую (например, они за NAT/на других хостах)"
+    echo
+    read -rp "Выбор, можно несколько через пробел (например «0 2») [0]: " BIND_CHOICES
+    BIND_CHOICES="${BIND_CHOICES:-0}"
+
+    BIND_ADDRS=(); WANT_VPN=0
+    for c in $BIND_CHOICES; do
+        if [[ "$c" == "0" ]]; then
+            BIND_ADDRS+=("127.0.0.1")
+        elif [[ "$c" == "$VPN_OPT" ]]; then
+            WANT_VPN=1
+        elif [[ "$c" =~ ^[0-9]+$ ]] && (( c >= 1 && c < VPN_OPT )); then
+            BIND_ADDRS+=("${IFACE_IPS[$((c - 1))]}")
+        else
+            echo "пропускаю нераспознанный вариант: $c" >&2
+        fi
+    done
+    [[ ${#BIND_ADDRS[@]} -gt 0 || "$WANT_VPN" -eq 1 ]] || BIND_ADDRS=("127.0.0.1")
 
     install_python_deps
 
@@ -73,28 +105,61 @@ cmd_install() {
             "$INSTALL_DIR/venv/bin/python3" "$INSTALL_DIR/manage.py" create-admin
     fi
 
-    echo "==== VPN-хелпер (WireGuard, опционально — используется, только если включите VPN) ===="
-    if command -v wg-quick >/dev/null 2>&1; then
+    if [[ "$WANT_VPN" -eq 1 ]]; then
+        echo "==== VPN-хаб (WireGuard) ===="
+        if ! command -v wg-quick >/dev/null 2>&1; then
+            case "$(detect_pkg_manager)" in
+                apt-get) apt-get update -y && apt-get install -y wireguard-tools ;;
+                dnf)     dnf install -y wireguard-tools ;;
+                yum)     yum install -y wireguard-tools ;;
+                *) echo "не удалось поставить wireguard-tools автоматически — установите вручную и повторите" >&2; exit 1 ;;
+            esac
+        fi
         install -o root -g root -m 700 "$SCRIPT_DIR/deploy/f2b-center-vpn-helper.sh" /usr/local/sbin/f2b-center-vpn-helper
         sed "s/CHANGE_ME_SERVICE_USER/$SERVICE_USER/" "$SCRIPT_DIR/deploy/sudoers-f2b-center-vpn" > /tmp/.f2b-center-vpn-sudoers.new
         visudo -cf /tmp/.f2b-center-vpn-sudoers.new
         install -o root -g root -m 440 /tmp/.f2b-center-vpn-sudoers.new /etc/sudoers.d/f2b-center-vpn
         rm -f /tmp/.f2b-center-vpn-sudoers.new
-    else
-        echo "wireguard-tools не найден — пропущено (VPN-хаб можно будет включить, поставив wg-quick, позже)."
+
+        echo "Адрес/домен, по которому агенты будут стучаться для VPN-хендшейка (обычно один из"
+        echo "адресов выше, либо публичный IP этого хоста, если агенты снаружи):"
+        read -rp "Endpoint: " VPN_ENDPOINT
+        [[ -n "$VPN_ENDPOINT" ]] || { echo "endpoint обязателен для VPN-хаба" >&2; exit 1; }
+        read -rp "VPN-подсеть [10.99.0.0/24]: " VPN_SUBNET
+        VPN_SUBNET="${VPN_SUBNET:-10.99.0.0/24}"
+        read -rp "VPN-порт, UDP [51820]: " VPN_PORT
+        VPN_PORT="${VPN_PORT:-51820}"
+
+        sudo -u "$SERVICE_USER" env F2B_CENTER_DATA_DIR="$INSTALL_DIR/data" \
+            "$INSTALL_DIR/venv/bin/python3" "$INSTALL_DIR/manage.py" vpn-init \
+            --subnet "$VPN_SUBNET" --port "$VPN_PORT" --endpoint "$VPN_ENDPOINT"
+
+        VPN_CENTER_IP=$(python3 -c "import ipaddress; print(next(ipaddress.ip_network('$VPN_SUBNET', strict=False).hosts()))")
+        BIND_ADDRS+=("$VPN_CENTER_IP")
+        echo "VPN-хаб поднят, центр слушает и на $VPN_CENTER_IP — агенты подключаются через"
+        echo "install_agent.sh --setup-vpn (см. README/agent/README.md)."
     fi
 
-    sed \
-        -e "s/CHANGE_ME_SERVICE_USER/$SERVICE_USER/" \
-        -e "s/127\.0\.0\.1:8766/$BIND_ADDR:$PORT/" \
-        "$SCRIPT_DIR/deploy/fail2ban-center.service" > "$SERVICE_UNIT"
+    python3 - "$SCRIPT_DIR/deploy/fail2ban-center.service" "$SERVICE_USER" "$PORT" "${BIND_ADDRS[*]}" <<'PYEOF' > "$SERVICE_UNIT"
+import sys
+tmpl_path, service_user, port, bind_addrs = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].split()
+with open(tmpl_path) as f:
+    content = f.read()
+content = content.replace("CHANGE_ME_SERVICE_USER", service_user)
+bind_lines = " \\\n".join(f"    --bind {addr}:{port}" for addr in bind_addrs)
+content = content.replace("    --bind 127.0.0.1:8766 \\", bind_lines + " \\")
+sys.stdout.write(content)
+PYEOF
 
     systemctl daemon-reload
     systemctl enable --now "$SERVICE_NAME"
 
     echo
     echo "==== Готово ===="
-    echo "Слушает на $BIND_ADDR:$PORT — снаружи только через reverse-proxy с TLS (см. README.md)."
+    for addr in "${BIND_ADDRS[@]}"; do
+        echo "Слушает на $addr:$PORT"
+    done
+    echo "Кроме прямого localhost — только через reverse-proxy с TLS (см. README.md)."
     systemctl status "$SERVICE_NAME" --no-pager || true
 }
 
