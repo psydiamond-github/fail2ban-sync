@@ -127,21 +127,18 @@ _host_base_ignoreip() {
         | grep -vxF "$PERMANENT_JAIL" | grep -vxF "$TOR_JAIL" | head -n1)
     [[ -n "$base_jail" ]] && eff=$(fail2ban-client get "$base_jail" ignoreip 2>/dev/null | _extract_ignoreip)
 
-    local -A exclude=() seen=()
+    # Без ассоциативных массивов (переносимость на OpenWrt/старый bash): членство проверяем
+    # по строке " a b c ". exclude — адреса центра (их в базу не берём).
+    local exclude=" $* " result=" "
     local a
-    for a in "$@"; do exclude["$a"]=1; done
-    local -a base=()
-    for a in $eff; do
-        [[ -n "${exclude[$a]:-}" || -n "${seen[$a]:-}" ]] && continue
-        seen["$a"]=1; base+=("$a")
+    # Loopback в конце списка-кандидатов: держим всегда, иначе при пустом eff fail2ban мог бы
+    # забанить 127.0.0.1.
+    for a in $eff 127.0.0.0/8 ::1; do
+        case "$exclude" in *" $a "*) continue;; esac   # адрес добавил центр — пропускаем
+        case "$result" in *" $a "*) continue;; esac     # уже есть — дедуп
+        result="$result$a "
     done
-    # Loopback держим всегда: если эффективный ignoreip пуст (редкая конфигурация), без него
-    # fail2ban мог бы забанить 127.0.0.1.
-    for a in 127.0.0.0/8 ::1; do
-        [[ -n "${seen[$a]:-}" ]] && continue
-        seen["$a"]=1; base+=("$a")
-    done
-    echo "${base[*]}"
+    echo "${result# }" | sed 's/[[:space:]]*$//'
 }
 
 # Создаёт 00-файл с базой, если его ещё нет. Аргументы — адреса от центра (их исключаем
