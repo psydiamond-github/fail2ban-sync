@@ -356,12 +356,55 @@ def revoke_global_block_everywhere(ip: str, actor: str = "scheduler", except_age
 MIN_IGNORE_PREFIXLEN = 8
 
 
-def add_global_block_ignore(network: str, comment: str, actor: str) -> None:
+def _ip_in_network(ip: str, net) -> bool:
+    try:
+        return ipaddress.ip_address(ip) in net
+    except ValueError:
+        return False
+
+
+def lift_bans_in_network(net, actor: str) -> int:
+    """Снимает уже стоящие баны для адресов, попавших в сеть net: общий блок-лист (на всех
+    агентах, с забыванием IP) и обычные джейлы на хостах. «Это не бот» → разбанить везде.
+    Возвращает число адресов, по которым что-то снято."""
+    pairs: set[tuple[int, str, str]] = set()
+    # Из текущего состояния банов (обычные джейлы + подтверждённые служебные).
+    for agent in db.list_agents():
+        if agent["revoked_at"] or agent["event_only"]:
+            continue
+        for r in db.list_ban_state(agent["id"]):
+            if _ip_in_network(r["ip"], net):
+                pairs.add((agent["id"], r["jail"], r["ip"]))
+    # Из общего блок-листа — в т.ч. применения, ещё не подтверждённые агентом (их нет в
+    # ban_state, но разбан нужен).
+    gb_ips = [row["ip"] for row in db.list_global_blocklist() if _ip_in_network(row["ip"], net)]
+    for ip in gb_ips:
+        for ar in db.list_global_applied(ip):
+            pairs.add((ar["agent_id"], ar["jail"], ip))
+
+    lifted: set[str] = set()
+    for agent_id, jail, ip in sorted(pairs):
+        db.queue_task(agent_id, "unban", {"jail": jail, "ip": ip}, actor)
+        db.remove_ban_state(agent_id, jail, ip)
+        db.log_action(actor, agent_id, "ignore_unban", ip=ip, jail=jail)
+        lifted.add(ip)
+    # Полностью забываем IP из общего блок-листа (чтобы «липкая память» не вернула его).
+    for ip in gb_ips:
+        for ar in db.list_global_applied(ip):
+            db.unmark_global_applied(ip, ar["agent_id"])
+        db.delete_global_block(ip)
+        lifted.add(ip)
+    return len(lifted)
+
+
+def add_global_block_ignore(network: str, comment: str, actor: str) -> int:
     net = ipaddress.ip_network(network, strict=False)
     if net.prefixlen < MIN_IGNORE_PREFIXLEN:
         raise ValueError(f"Сеть шире /{MIN_IGNORE_PREFIXLEN} не принимается (опечатка в маске?): {network}")
     db.add_global_block_ignore(str(net), comment, actor)
     db.log_action(actor, None, "global_block_ignore_add", ip=str(net), detail=comment)
+    # Пометка «не бот» снимает и уже стоящие баны для попавших адресов.
+    return lift_bans_in_network(net, actor)
 
 
 def remove_global_block_ignore(ignore_id: int, actor: str) -> None:
@@ -391,6 +434,7 @@ def import_global_block_ignore_text(text: str, actor: str) -> tuple[int, list[st
         db.add_global_block_ignore(net, "", actor)
         existing.add(net)
         added += 1
+        lift_bans_in_network(ipaddress.ip_network(net), actor)
     if added:
         db.log_action(actor, None, "global_block_ignore_import", detail=f"добавлено {added}")
     return added, errors

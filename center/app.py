@@ -734,8 +734,11 @@ def create_app() -> Flask:
             return redirect(url_for("admin_blocklist"))
         network = request.form.get("network", "").strip()
         try:
-            tasks.add_global_block_ignore(network, request.form.get("comment", ""), _actor())
-            flash(f"{network} добавлена в игнор-лист блок-листа.", "ok")
+            lifted = tasks.add_global_block_ignore(network, request.form.get("comment", ""), _actor())
+            msg = f"{network} добавлена в игнор-лист блок-листа."
+            if lifted:
+                msg += f" Снят бан с {lifted} адрес(ов) — разбан поставлен в очередь."
+            flash(msg, "ok")
         except ValueError as e:
             flash(str(e), "error")
         return redirect(url_for("admin_blocklist"))

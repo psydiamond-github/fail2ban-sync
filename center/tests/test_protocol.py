@@ -562,25 +562,53 @@ def test_global_ignore_blocks_escalation_but_keeps_local_ban(center):
     assert [r["ip"] for r in db.list_ban_state(a1, "sshd")] == ["203.0.113.50"], "локальный бан остаётся"
 
 
-def test_global_ignore_is_prospective_not_retroactive(center):
-    """Игнор-лист действует вперёд: уже выставленный глобальный бан он задним числом не снимает,
-    а явный ручной «бан навсегда везде» он не отменяет (осознанное действие админа важнее)."""
+def test_adding_to_ignore_list_lifts_existing_bans(center):
+    """Добавление в игнор-лист снимает уже стоящие баны для попавших адресов: общий блок-лист
+    (на всех агентах, с забыванием IP) и обычные джейлы — «это не бот» → разбанить везде."""
+    import json
     db, tasks = center["db"], center["tasks"]
     db.set_setting("global_block_enabled", "1")
     db.set_setting("global_block_threshold", "3")
     a1, _ = _register(db, "host1")
-    _register(db, "host2")
+    a2, _ = _register(db, "host2")
 
-    tasks.add_global_block_ignore("198.51.100.0/24", "офис", "admin")
-    tasks.ban_forever_everywhere("198.51.100.9", a1, "admin")
-    assert db.get_global_block("198.51.100.9") is not None, "ручной бан навсегда переопределяет игнор-лист"
-
+    # IP ушёл в общий блок-лист (стоит на обоих хостах)
     ag1 = db.get_agent(a1)
     for i in range(3):
         tasks.handle_new_ban(ag1, "sshd", "192.0.2.7", f"2026-02-0{i + 1} 00:00:00", source="checkin")
     assert db.get_global_block("192.0.2.7") is not None
-    tasks.add_global_block_ignore("192.0.2.7/32", "передумали", "admin")
-    assert db.get_global_block("192.0.2.7") is not None, "добавление в игнор не снимает уже выставленный бан"
+    # и обычный бан в sshd на host1
+    db.upsert_ban_state(a1, "sshd", "192.0.2.50", db.now())
+
+    def pending_unbans(aid):
+        return [json.loads(t["payload"]) if isinstance(t["payload"], str) else t["payload"]
+                for t in db.list_tasks_for_agent(aid, limit=200)
+                if t["type"] == "unban" and t["status"] == "pending"]
+
+    lifted = tasks.add_global_block_ignore("192.0.2.0/24", "офис", "admin")
+    assert lifted >= 2, "сняты и блок-лист, и обычный бан"
+    assert db.get_global_block("192.0.2.7") is None, "IP забыт из общего блок-листа"
+    # разбан 192.0.2.7 поставлен на оба хоста, 192.0.2.50 — на host1
+    assert any(u["ip"] == "192.0.2.7" for u in pending_unbans(a1))
+    assert any(u["ip"] == "192.0.2.7" for u in pending_unbans(a2))
+    assert any(u["ip"] == "192.0.2.50" and u["jail"] == "sshd" for u in pending_unbans(a1))
+    # состояние банов очищено
+    assert not any(r["ip"] in ("192.0.2.7", "192.0.2.50") for r in db.list_ban_state(a1))
+
+
+def test_manual_ban_forever_still_overrides_ignore_but_add_lifts_it(center):
+    """Ручной «бан навсегда везде» по-прежнему переопределяет игнор при постановке; но если
+    потом добавить IP в игнор-лист — бан снимается (как и любой другой)."""
+    db, tasks = center["db"], center["tasks"]
+    db.set_setting("global_block_enabled", "1")
+    a1, _ = _register(db, "host1")
+    _register(db, "host2")
+    tasks.add_global_block_ignore("198.51.100.0/24", "офис", "admin")
+    tasks.ban_forever_everywhere("198.51.100.9", a1, "admin")
+    assert db.get_global_block("198.51.100.9") is not None, "ручной бан навсегда переопределяет игнор"
+    # повторное добавление той же сети (или импорт) снимет и его
+    tasks.lift_bans_in_network(__import__("ipaddress").ip_network("198.51.100.0/24"), "admin")
+    assert db.get_global_block("198.51.100.9") is None
 
 
 def test_permanent_ignore_sync_sends_only_center_addresses(center):
