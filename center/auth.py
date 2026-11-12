@@ -40,9 +40,15 @@ def record_login_success(remote_ip: str) -> None:
         _login_failures.pop(remote_ip, None)
 
 
+# Хэш несуществующего пароля — чтобы сверка пароля шла и для неизвестного логина: иначе по
+# времени ответа можно отличить существующего пользователя от несуществующего (enumeration).
+_DUMMY_HASH = generate_password_hash("f2b-center-dummy-password-for-timing")
+
+
 def verify_login(username: str, password: str) -> Optional[dict]:
     user = db.get_user_by_username(username)
-    if user is None or not check_password_hash(user["password_hash"], password):
+    ok = check_password_hash(user["password_hash"] if user else _DUMMY_HASH, password)
+    if user is None or not ok:
         return None
     return dict(user)
 

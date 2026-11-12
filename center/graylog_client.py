@@ -23,8 +23,16 @@ class GraylogError(Exception):
     pass
 
 
+def _validate_http_url(url: str) -> str:
+    """Только http/https: иначе requests со схемами file://, ftp://, gopher:// и т.п. даёт
+    SSRF/чтение файлов. Пустой URL — не настроено, это не ошибка здесь."""
+    if url and not url.lower().startswith(("http://", "https://")):
+        raise GraylogError(f"URL Graylog должен начинаться с http:// или https:// (получено: {url[:40]})")
+    return url
+
+
 def _config() -> tuple[str, str, str]:
-    url = (db.get_setting("graylog_url") or "").rstrip("/")
+    url = _validate_http_url((db.get_setting("graylog_url") or "").strip().rstrip("/"))
     token = db.get_setting("graylog_api_token") or ""
     stream_id = db.get_setting("graylog_stream_id") or ""
     return url, token, stream_id

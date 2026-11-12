@@ -548,9 +548,11 @@ def refresh_tor_exit_nodes() -> int:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             text = f.read()
     else:
-        url = db.get_setting("tor_block_source_url") or ""
+        url = (db.get_setting("tor_block_source_url") or "").strip()
         if not url:
             return 0
+        if not url.lower().startswith(("http://", "https://")):
+            raise ValueError("URL источника Tor должен начинаться с http:// или https://")
         proxy_url = db.get_setting("tor_block_proxy_url") or ""
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         resp = requests.get(url, timeout=20, proxies=proxies)
