@@ -541,3 +541,60 @@ def test_agent_diff_ignores_jail_that_could_not_be_read():
     new_bans, new_unbans = agent.diff_bans(last, current)
     assert "agent-permanent-ban" not in new_unbans
     assert [e["ip"] for e in new_unbans["sshd"]] == ["2.2.2.2"]
+
+
+def test_global_ignore_blocks_escalation_but_keeps_local_ban(center):
+    """Игнор-лист блок-листа: IP из него НЕ уходит в постоянный бан на все хосты (эскалации
+    нет), но обычный бан на самом хосте остаётся — ровно «максимум обычный бан на каждом хосте»."""
+    db, tasks = center["db"], center["tasks"]
+    db.set_setting("global_block_enabled", "1")
+    db.set_setting("global_block_threshold", "3")
+    a1, _ = _register(db, "host1")
+    a2, _ = _register(db, "host2")
+    tasks.add_global_block_ignore("203.0.113.0/24", "офис", "admin")
+
+    ag1 = db.get_agent(a1)
+    for i in range(5):  # много банов подряд на одном хосте — порог превышен
+        tasks.handle_new_ban(ag1, "sshd", "203.0.113.50", f"2026-01-0{i + 1} 00:00:00", source="checkin")
+
+    assert db.get_global_block("203.0.113.50") is None, "IP из игнор-листа не должен попадать в блок-лист"
+    assert not db.list_tasks_for_agent(a2), "другим хостам не должно ставиться задач"
+    assert [r["ip"] for r in db.list_ban_state(a1, "sshd")] == ["203.0.113.50"], "локальный бан остаётся"
+
+
+def test_global_ignore_is_prospective_not_retroactive(center):
+    """Игнор-лист действует вперёд: уже выставленный глобальный бан он задним числом не снимает,
+    а явный ручной «бан навсегда везде» он не отменяет (осознанное действие админа важнее)."""
+    db, tasks = center["db"], center["tasks"]
+    db.set_setting("global_block_enabled", "1")
+    db.set_setting("global_block_threshold", "3")
+    a1, _ = _register(db, "host1")
+    _register(db, "host2")
+
+    tasks.add_global_block_ignore("198.51.100.0/24", "офис", "admin")
+    tasks.ban_forever_everywhere("198.51.100.9", a1, "admin")
+    assert db.get_global_block("198.51.100.9") is not None, "ручной бан навсегда переопределяет игнор-лист"
+
+    ag1 = db.get_agent(a1)
+    for i in range(3):
+        tasks.handle_new_ban(ag1, "sshd", "192.0.2.7", f"2026-02-0{i + 1} 00:00:00", source="checkin")
+    assert db.get_global_block("192.0.2.7") is not None
+    tasks.add_global_block_ignore("192.0.2.7/32", "передумали", "admin")
+    assert db.get_global_block("192.0.2.7") is not None, "добавление в игнор не снимает уже выставленный бан"
+
+
+def test_permanent_ignore_sync_sends_only_center_addresses(center):
+    """Центр в permanent_ignore_sync шлёт ТОЛЬКО свои адреса, без базы хоста: база живёт на
+    хосте (00-файл) и подставляется переменной, центр её не копирует и не затирает."""
+    import json
+    db, tasks = center["db"], center["tasks"]
+    aid, _ = _register(db, "host1")
+    db.set_agent_baseline_ignoreip(aid, ["127.0.0.1/8", "::1", "10.0.0.0/8"])  # база хоста
+    tasks.add_permanent_ignore(aid, "198.51.100.5", "admin")
+    tasks.add_permanent_ignore(aid, "203.0.113.0/24", "admin")
+
+    task = [t for t in db.list_tasks_for_agent(aid) if t["type"] == "permanent_ignore_sync"][0]
+    payload = json.loads(task["payload"]) if isinstance(task["payload"], str) else task["payload"]
+    assert set(payload["ip_list"]) == {"198.51.100.5", "203.0.113.0/24"}
+    assert "10.0.0.0/8" not in payload["ip_list"], "база хоста не должна попадать в задачу центра"
+    assert "127.0.0.1/8" not in payload["ip_list"]

@@ -370,24 +370,16 @@ if [[ "$HAS_SYSTEMD" -eq 1 ]]; then
     rm -f /tmp/.f2b-agent-sudoers.new
 fi
 
-echo "==== Проверка доступа к helper и провижининг agent-permanent-ban ===="
+echo "==== Провижининг agent-permanent-ban и захват базового ignoreip хоста ===="
+# ensure-permanent-jail создаёт служебный джейл и один раз сохраняет текущий эффективный
+# ignoreip хоста (вместе с дефолтом 127.0.0.1/8 из jail.conf) в 00-f2b-agent-base.local.
+# Этот файл дальше принадлежит хосту: центр его не трогает, а 99-файл ссылается на него
+# переменной — поэтому база не теряется и не затирается синхронизацией с центром.
 if agent_helper ensure-permanent-jail; then
-    echo "OK — helper работает, служебный джейл agent-permanent-ban готов."
+    echo "OK — helper работает, служебный джейл готов, база сохранена: $(agent_helper base-ignoreip)"
 else
     echo "ОШИБКА: $AGENT_USER не может выполнить f2b-agent-helper — проверьте sudoers и fail2ban" >&2
     exit 1
-fi
-
-echo "==== Перенос текущего ignoreip хоста (jail.local) в постоянный игнор агента ===="
-# jail.d/*.local (наш agent-permanent-ban) грузится fail2ban'ом ПОСЛЕ jail.local — если
-# сейчас же не перенести туда то, что уже настроено на хосте, окно до первого успешного
-# report_full_state/permanent_ignore_sync с центра осталось бы без этой защиты.
-current_ignoreip=$(agent_helper jail-local-ignoreip)
-if [[ -n "$current_ignoreip" ]]; then
-    printf '%s\n' $current_ignoreip | agent_helper sync-permanent >/dev/null
-    echo "OK — перенесено: $current_ignoreip"
-else
-    echo "в jail.local ignoreip не задан — переносить нечего."
 fi
 
 if [[ "$HAS_SYSTEMD" -eq 1 ]]; then

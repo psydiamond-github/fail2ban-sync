@@ -94,6 +94,83 @@ ignoreregex =
 '
 PERMANENT_JAIL_PATH="/etc/fail2ban/jail.d/99-f2b-agent-permanent.local"
 TOR_JAIL_PATH="/etc/fail2ban/jail.d/99-f2b-agent-tor.local"
+# Базовый ignoreip хоста живёт в ОТДЕЛЬНОМ файле, который центр не трогает. 99-файл выше
+# ссылается на него переменной (%(f2b_base_ignoreip)s), а не копирует значение — поэтому
+# правка базы на хосте переживает любую синхронизацию с центром, а центр шлёт только СВОИ
+# адреса. Захватывается один раз (эффективный ignoreip, вместе с дефолтом 127.0.0.1/8 из
+# jail.conf), дальше принадлежит администратору хоста.
+BASE_IGNOREIP_PATH="/etc/fail2ban/jail.d/00-f2b-agent-base.local"
+BASE_IGNOREIP_VAR="f2b_base_ignoreip"
+
+# Адреса из вывода `fail2ban-client get <jail> ignoreip`. Вывод — заголовок плюс строки
+# списка с префиксами "|- " и "`- "; берём ТОЛЬКО элементы списка (иначе в базу попал бы
+# мусор вроде "ed:" из слова "ignored:"), и только токены, похожие на IP/IPv6/CIDR.
+IP_TOKEN_RE='^([0-9]{1,3}(\.[0-9]{1,3}){3}|[0-9A-Fa-f:]+)(/[0-9]{1,3})?$'
+_extract_ignoreip() {
+    local line tok
+    while IFS= read -r line; do
+        line="${line#*- }"                       # срезаем префикс "|- " / "`- "
+        tok="${line%%[[:space:]]*}"              # первый токен строки
+        [[ "$tok" =~ $IP_TOKEN_RE ]] && echo "$tok"
+    done
+}
+
+# Эффективный ignoreip хоста БЕЗ наших добавлений: читаем live-значение любого обычного
+# джейла (оно включает дефолт из jail.conf, jail.local и прочие jail.d), затем вычитаем
+# адреса, которые добавил центр (переданы аргументами). Нужно только для первичного
+# захвата базы, когда файла 00- ещё нет.
+_host_base_ignoreip() {
+    local base_jail eff
+    base_jail=$(fail2ban-client status 2>/dev/null \
+        | sed -n 's/^.*Jail list:[[:space:]]*//p' | tr ',' '\n' \
+        | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | grep -vxF "$PERMANENT_JAIL" | grep -vxF "$TOR_JAIL" | head -n1)
+    [[ -n "$base_jail" ]] && eff=$(fail2ban-client get "$base_jail" ignoreip 2>/dev/null | _extract_ignoreip)
+
+    local -A exclude=() seen=()
+    local a
+    for a in "$@"; do exclude["$a"]=1; done
+    local -a base=()
+    for a in $eff; do
+        [[ -n "${exclude[$a]:-}" || -n "${seen[$a]:-}" ]] && continue
+        seen["$a"]=1; base+=("$a")
+    done
+    # Loopback держим всегда: если эффективный ignoreip пуст (редкая конфигурация), без него
+    # fail2ban мог бы забанить 127.0.0.1.
+    for a in 127.0.0.0/8 ::1; do
+        [[ -n "${seen[$a]:-}" ]] && continue
+        seen["$a"]=1; base+=("$a")
+    done
+    echo "${base[*]}"
+}
+
+# Создаёт 00-файл с базой, если его ещё нет. Аргументы — адреса от центра (их исключаем
+# из захватываемой базы). Существующий файл не трогаем: база принадлежит хосту.
+ensure_base_ignoreip_file() {
+    [[ -f "$BASE_IGNOREIP_PATH" ]] && return 0
+    local base_line
+    base_line=$(_host_base_ignoreip "$@")
+    local tmp; tmp=$(mktemp)
+    cat > "$tmp" <<EOF
+# Базовый ignoreip этого хоста, захваченный при установке агента fail2ban-center.
+# Правьте ЗДЕСЬ — центр этот файл не перезаписывает. 99-f2b-agent-permanent.local
+# подставляет это значение через %(${BASE_IGNOREIP_VAR})s. НЕ удаляйте файл: без него
+# переменная станет неопределённой и fail2ban не загрузит конфиг.
+[DEFAULT]
+${BASE_IGNOREIP_VAR} = ${base_line}
+EOF
+    install -o root -g root -m 644 "$tmp" "$BASE_IGNOREIP_PATH"
+    rm -f "$tmp"
+}
+
+# Значение базы для показа в панели (из 00-файла; fallback — jail.local).
+cmd_base_ignoreip() {
+    if [[ -f "$BASE_IGNOREIP_PATH" ]]; then
+        sed -n "s/^[[:space:]]*${BASE_IGNOREIP_VAR}[[:space:]]*=[[:space:]]*//p" "$BASE_IGNOREIP_PATH" | head -n1
+    else
+        cmd_jail_local_ignoreip
+    fi
+}
 
 ensure_noop_filter_content() {
     if [[ ! -f "$NOOP_FILTER_PATH" ]] || [[ "$(cat "$NOOP_FILTER_PATH")" != "$(printf '%s' "$NOOP_FILTER_CONTENT")" ]]; then
@@ -104,35 +181,33 @@ ensure_noop_filter_content() {
     fi
 }
 
-# agent-permanent-ban (bantime=-1) + [DEFAULT] ignoreip (постоянный игнор, замещение — не
-# патч). Провижинится install-скриптом, здесь — идемпотентно при каждом sync-permanent.
+# agent-permanent-ban (bantime=-1) + постоянный игнор. ignoreip собирается из базы хоста
+# (переменная из 00-файла) и адресов, присланных центром на stdin — центр шлёт ТОЛЬКО свои
+# адреса, базу не копирует. Идемпотентно при каждом sync-permanent.
 cmd_sync_permanent() {
-    local ip line
+    local ip
     local -a ips=()
     while IFS= read -r ip; do
         [[ -n "$ip" ]] || continue
         [[ "$ip" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?$ ]] || die "некорректный IP/CIDR в ignoreip: $ip"
         ips+=("$ip")
     done
-    local ignoreip_line="${ips[*]:-}"
 
     ensure_noop_filter_content
+    ensure_base_ignoreip_file "${ips[@]}"
 
-    # jail.d/*.local грузится fail2ban'ом ПОСЛЕ jail.local — пустой "ignoreip =" здесь
-    # безусловно перебивал бы уже настроенный на хосте базовый ignoreip из jail.local.
-    # Пишем строку [DEFAULT] только когда реально есть что переопределять; центр сам
-    # включает в этот список известный baseline (см. tasks.sync_permanent_ignore) —
-    # пусто здесь означает "постоянного игнора через центр ещё не добавляли", а не
-    # "снять весь ignoreip хоста".
-    local default_block=""
-    if [[ -n "$ignoreip_line" ]]; then
-        default_block=$'[DEFAULT]\nignoreip = '"$ignoreip_line"$'\n\n'
-    fi
+    # %(f2b_base_ignoreip)s — база хоста из 00-файла (fail2ban интерполирует переменные
+    # внутри [DEFAULT]); дальше — адреса центра. Строка ignoreip есть всегда, поэтому даже
+    # без адресов центра база сохраняется (и 127.0.0.1/8 из неё не теряется).
+    local ignoreip_line="%(${BASE_IGNOREIP_VAR})s${ips[*]:+ ${ips[*]}}"
 
     local jail_content
     jail_content=$(cat <<EOF
 # Установлено автоматически f2b-agent-helper.
-${default_block}[${PERMANENT_JAIL}]
+[DEFAULT]
+ignoreip = ${ignoreip_line}
+
+[${PERMANENT_JAIL}]
 enabled = true
 bantime = -1
 filter = f2b-agent-noop
@@ -144,8 +219,9 @@ EOF
 }
 
 cmd_ensure_permanent_jail() {
-    # Как cmd_sync_permanent, но без изменения ignoreip.
-    if [[ -f "$PERMANENT_JAIL_PATH" ]]; then
+    # Провижининг джейла + захват базы хоста (на установке, пока наших файлов ещё нет,
+    # база = чистый эффективный ignoreip). ignoreip не меняет сверх базы.
+    if [[ -f "$PERMANENT_JAIL_PATH" && -f "$BASE_IGNOREIP_PATH" ]]; then
         echo "unchanged"
         return 0
     fi
@@ -367,6 +443,7 @@ case "$sub" in
     jail-addignoreip)     [[ $# -eq 2 ]] || die "usage: jail-addignoreip <jail> <ip>"; cmd_jail_addignoreip "$@" ;;
     jail-delignoreip)     [[ $# -eq 2 ]] || die "usage: jail-delignoreip <jail> <ip>"; cmd_jail_delignoreip "$@" ;;
     jail-local-ignoreip)  [[ $# -eq 0 ]] || die "usage: jail-local-ignoreip";         cmd_jail_local_ignoreip ;;
+    base-ignoreip)        [[ $# -eq 0 ]] || die "usage: base-ignoreip";                cmd_base_ignoreip ;;
     sync-permanent)       [[ $# -eq 0 ]] || die "usage: sync-permanent (< ignoreip построчно на stdin)"; cmd_sync_permanent ;;
     ensure-permanent-jail) [[ $# -eq 0 ]] || die "usage: ensure-permanent-jail";      cmd_ensure_permanent_jail ;;
     ensure-notify-action) [[ $# -eq 1 ]] || die "usage: ensure-notify-action <jail>"; cmd_ensure_notify_action "$@" ;;

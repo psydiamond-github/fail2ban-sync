@@ -73,7 +73,7 @@ HMAC-SHA256 с ключом `data/secret_key`; привязан к одному 
 | `ignore_add` / `ignore_del` | `jail`, `ip` | `addignoreip` / `delignoreip`; TTL ведёт центр |
 | `permanent_ignore_sync` | `ip_list` | перезапись `jail.d/99-f2b-agent-permanent.local` + `reload` с откатом при ошибке |
 | `tor_sync` | `ban_ips`, `unban_ips` | бан/разбан в `agent-tor-block` пачками по 200 адресов |
-| `report_full_state` | — | полный список банов по джейлам + `ignoreip` из `jail.local` |
+| `report_full_state` | — | полный список банов по джейлам + базовый `ignoreip` хоста (для показа) |
 | `ping` | — | ничего |
 
 Задача, на которую нет результата за `agent_task_stale_after_missed` интервалов, помечается
@@ -150,9 +150,16 @@ HMAC-SHA256 с ключом `data/secret_key`; привязан к одному 
 
 - Временный: задача `ignore_add`, запись в `temp_ignore` с `expires_at`; по истечении
   планировщик ставит `ignore_del`.
-- Постоянный: центр собирает список из `ignoreip` в `jail.local` хоста (`baseline_ignoreip`,
-  приходит в `report_full_state`) и своих записей и отправляет целиком
-  (`permanent_ignore_sync`). Принимает IPv6 и сети.
+- Постоянный: центр отправляет (`permanent_ignore_sync`) ТОЛЬКО свои адреса, принимает IPv6
+  и сети. База хоста живёт на хосте: при установке helper захватывает эффективный `ignoreip`
+  (через `fail2ban-client get <jail> ignoreip`, вместе с дефолтом `127.0.0.0/8` из `jail.conf`)
+  в `jail.d/00-f2b-agent-base.local` как `f2b_base_ignoreip`. Файл `jail.d/99-…` пишет
+  `ignoreip = %(f2b_base_ignoreip)s <адреса центра>` — fail2ban интерполирует переменную.
+  Поэтому: (1) база не теряется и не затирается синхронизацией; (2) админ правит базу в
+  `00-…`, центр её не трогает; (3) `127.0.0.0/8` не пропадает. `baseline_ignoreip` в БД центра
+  — только для показа в панели (из `base-ignoreip`), в состав записываемого `ignoreip` не
+  входит. Если `00-…` отсутствует (миграция старого хоста, удаление файла), helper
+  восстанавливает базу как «эффективный `ignoreip` минус адреса, присланные центром».
 
 ### Tor
 

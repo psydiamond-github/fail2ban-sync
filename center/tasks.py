@@ -474,11 +474,11 @@ def queue_temp_ignore_remove(agent_id: int, jail: str, ip: str, actor: str) -> N
 
 
 def sync_permanent_ignore(agent_id: int, actor: str) -> None:
-    agent = db.get_agent(agent_id)
-    baseline = agent.get("baseline_ignoreip") or []
+    # Шлём только адреса, добавленные через центр. Базовый ignoreip хоста живёт на самом
+    # хосте (00-f2b-agent-base.local) и подставляется там переменной — центр его не трогает
+    # и не копирует. baseline_ignoreip в БД — только для показа в панели.
     ours = [r["ip"] for r in db.list_permanent_ignore(agent_id)]
-    merged = list(dict.fromkeys(list(baseline) + ours))
-    db.queue_task(agent_id, "permanent_ignore_sync", {"ip_list": merged}, actor)
+    db.queue_task(agent_id, "permanent_ignore_sync", {"ip_list": ours}, actor)
 
 
 def add_permanent_ignore(agent_id: int, ip: str, actor: str, comment: str = "") -> None:

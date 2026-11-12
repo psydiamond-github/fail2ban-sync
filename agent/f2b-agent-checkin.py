@@ -21,7 +21,7 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-AGENT_VERSION = "1.4.0"
+AGENT_VERSION = "1.5.0"
 
 # Синтетические джейлы, которыми управляет сам центр (создаются helper'ом по требованию,
 # при первом бане через них) — не приходят из fail2ban-client status на пустом хосте, но
@@ -235,10 +235,10 @@ def _execute_report_full_state(task_id: str, allowed_jail_names: set[str]) -> di
             continue
         bans[name] = _parse_banip_with_time(out)
 
-    rc, out, err = run_helper("jail-local-ignoreip")
+    rc, out, err = run_helper("base-ignoreip")
     baseline = [tok for tok in out.split() if tok.strip()] if rc == 0 else []
     if rc != 0:
-        log.warning("report_full_state: jail-local-ignoreip: %s", err.strip())
+        log.warning("report_full_state: base-ignoreip: %s", err.strip())
 
     return {"task_id": task_id, "status": "ok", "data": {"bans": bans, "baseline_ignoreip": baseline}}
 
