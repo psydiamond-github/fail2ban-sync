@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Управление агентами — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Управление агентами</h1>
+
+<div class="panel">
+  <table>
+    <tr><th>Имя</th><th>Группа</th><th>Статус</th><th></th></tr>
+    {% for a in agents %}
+    <tr>
+      <td><a href="{{ url_for('agent_detail', agent_id=a['id']) }}">{{ a['name'] }}</a></td>
+      <td class="muted">{{ group_path_by_agent.get(a['id'], '—') }}</td>
+      <td>{% if a['revoked_at'] %}<span class="badge error">отозван</span>{% else %}<span class="badge done">активен</span>{% endif %}</td>
+      <td>
+        <a class="btn secondary" href="{{ url_for('admin_agent_edit', agent_id=a['id']) }}">изменить</a>
+        <form method="post" action="{{ url_for('admin_agent_regenerate_token', agent_id=a['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="secondary">новый токен</button>
+        </form>
+        {% if not a['revoked_at'] %}
+        <form method="post" action="{{ url_for('admin_agent_revoke', agent_id=a['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="secondary">отозвать</button>
+        </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('admin_agent_delete', agent_id=a['id']) }}" class="inline"
+              onsubmit="return confirm('Удалить агента «{{ a['name'] }}» полностью?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">удалить</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">агентов нет</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Добавить агента</h2>
+<div class="panel">
+  <form method="post" action="{{ url_for('admin_agents_add') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p><label>Имя (= agent_id в протоколе)<br><input name="name" required style="width:100%"></label></p>
+    <p><label>Группа<br>
+      <select name="group_id">
+        <option value="">— без группы —</option>
+        {% for c in group_choices %}<option value="{{ c.id }}">{{ c.path }}</option>{% endfor %}
+      </select>
+    </label></p>
+    <button type="submit">Создать</button>
+  </form>
+  <p class="muted">
+    Токен показывается один раз сразу после создания — сохраните его для install-скрипта агента.
+    Джейлы указывать не нужно — install_agent.sh сам находит их на хосте
+    (<code>fail2ban-client status</code>) при установке, а обычный чекин дальше держит список
+    актуальным.
+  </p>
+  <p class="muted">
+    Агенты подключаются только по HTTPS и доверяют только собственному CA центра.
+    {% if ca_fingerprint %}
+    Отпечаток CA для <code>install_agent.sh --center-ca-sha256</code>:<br>
+    <code>{{ ca_fingerprint }}</code>
+    {% else %}
+    <span class="badge error">CA центра не найден</span> — выполните <code>deploy/install.sh configure</code>.
+    {% endif %}
+  </p>
+</div>
+{% endblock %}

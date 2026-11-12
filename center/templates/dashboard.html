@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Агенты — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Агенты</h1>
+
+<div class="panel">
+  <table>
+    <tr><th>Имя</th><th>Группа</th><th>Статус</th><th>Последний чекин</th><th>Джейлы</th><th></th></tr>
+    {% for a in agents %}
+    <tr>
+      <td><a href="{{ url_for('agent_detail', agent_id=a['id']) }}">{{ a['name'] }}</a></td>
+      <td class="muted">{{ group_path_by_agent.get(a['id'], '—') }}</td>
+      <td>
+        {% if a['revoked_at'] %}<span class="badge error">отозван</span>
+        {% elif not a['last_seen'] %}<span class="badge pending">ещё не подключался</span>
+        {% else %}<span class="badge done">активен</span>{% endif %}
+      </td>
+      <td class="muted">{{ a['last_seen'] or '—' }} {% if a['last_ip'] %}({{ a['last_ip'] }}){% endif %}</td>
+      <td class="muted">{{ a['allowed_jails'] | map(attribute='name') | join(', ') }}</td>
+      <td><a class="btn" href="{{ url_for('agent_detail', agent_id=a['id']) }}">открыть</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">Агентов пока нет — добавьте на странице «Управление агентами».</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+[Unit]
+Description=Периодический чекин fail2ban-center agent
+
+[Timer]
+# По умолчанию совпадает с checkin_interval_seconds центра (60с) — при изменении настройки
+# на центре имеет смысл поправить и здесь. OnUnitActiveSec — от окончания предыдущего
+# запуска, не от начала (защита от наложения при медленной сети).
+OnBootSec=15
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

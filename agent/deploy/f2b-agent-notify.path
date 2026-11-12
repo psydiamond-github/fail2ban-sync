@@ -1,0 +1,11 @@
+[Unit]
+Description=fail2ban-center agent — сигнал о новых банах/разбанах от fail2ban
+
+[Path]
+# fail2ban дописывает сюда строку на каждый бан/разбан (действие f2b-agent-notify, см.
+# f2b-agent-helper ensure-notify-action) — сразу запускаем отправку в центр.
+PathModified=/run/fail2ban/f2b-agent.events
+Unit=f2b-agent-notify.service
+
+[Install]
+WantedBy=multi-user.target

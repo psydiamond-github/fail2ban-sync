@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Аккаунт — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Аккаунт: {{ current_username }}</h1>
+<div class="panel" style="max-width:360px;">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <p><label>Текущий пароль<br><input type="password" name="current_password" required style="width:100%"></label></p>
+    <p><label>Новый пароль<br><input type="password" name="new_password" required style="width:100%"></label></p>
+    <button type="submit">Сменить пароль</button>
+  </form>
+</div>
+{% endblock %}

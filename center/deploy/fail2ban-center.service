@@ -1,0 +1,40 @@
+[Unit]
+Description=fail2ban-center — центральный узел управления агентами fail2ban
+After=network.target
+
+[Service]
+Type=simple
+User=CHANGE_ME_SERVICE_USER
+Group=CHANGE_ME_SERVICE_USER
+WorkingDirectory=/opt/fail2ban-center
+
+Environment=F2B_CENTER_DATA_DIR=/opt/fail2ban-center/data
+Environment=F2B_CENTER_COOKIE_SECURE=1
+# TLS завершает сам gunicorn, прокси перед центром нет, поэтому X-Forwarded-* не доверяем:
+# иначе любой клиент подменил бы свой IP для rate-limit входа и ip_pin агентов.
+# "1" — только если перед центром всё же стоит свой reverse-proxy (deploy/install.sh configure).
+Environment=F2B_CENTER_TRUST_PROXY=0
+# Корневой сертификат собственного CA центра, его отдаёт /api/v1/ca.crt (см. deploy/install.sh).
+Environment=F2B_CENTER_CA_CERT=/etc/fail2ban-center/tls/ca.crt
+
+# --workers 1: scheduler.start() запускается один раз на процесс при импорте app.py —
+# несколько воркеров завели бы несколько дублирующих потоков планировщика (см. центр/README.md).
+# Параллельность — через --threads, не процессы, чтобы обработка одного медленного запроса
+# (например, обращение к Graylog) не блокировала остальных пользователей.
+ExecStart=/opt/fail2ban-center/venv/bin/gunicorn \
+    --workers 1 --threads 4 --worker-class gthread \
+    --bind 127.0.0.1:8766 \
+    --certfile /etc/fail2ban-center/tls/server.crt \
+    --keyfile /etc/fail2ban-center/tls/server.key \
+    --timeout 60 \
+    app:app
+Restart=on-failure
+RestartSec=5
+
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/fail2ban-center/data
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

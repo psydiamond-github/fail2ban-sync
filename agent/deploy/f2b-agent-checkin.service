@@ -1,0 +1,22 @@
+[Unit]
+Description=fail2ban-center agent — один чекин за запуск (см. .timer)
+After=network-online.target fail2ban.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=f2b-agent
+Group=f2b-agent
+ExecStart=/usr/bin/python3 /opt/f2b-agent/f2b-agent-checkin.py
+
+# Непривилегированный процесс — вся работа с fail2ban идёт через
+# sudo /usr/local/sbin/f2b-agent-helper (см. deploy/sudoers-f2b-agent).
+# NoNewPrivileges=true несовместим с sudo-эскалацией, на которой всё построено — не включаем.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=strict
+# /etc/fail2ban — сюда пишет sudo-эскалированный f2b-agent-helper (jail.d/filter.d
+# дропины для agent-permanent-ban/agent-tor-block); ProtectSystem=strict делает всю
+# ФС read-only для юнита включая дочерние root-процессы — это ограничение mount
+# namespace, sudo/root его не обходит, поэтому путь нужно разрешить явно.
+ReadWritePaths=/var/lib/f2b-agent /etc/fail2ban

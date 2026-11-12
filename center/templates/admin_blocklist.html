@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Глобальный блок-лист — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Глобальный блок-лист</h1>
+
+<div class="panel">
+  <table>
+    <tr><th>IP</th><th>Эпизодов банов</th><th>Активен</th><th>Обновлён</th><th></th></tr>
+    {% for e in entries %}
+    <tr>
+      <td>{{ e['ip'] }}</td>
+      <td>{{ e['ban_count'] }}</td>
+      <td>{% if e['active'] %}<span class="badge done">да</span>{% else %}<span class="badge">нет</span>{% endif %}</td>
+      <td class="muted">{{ e['updated_at'] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin_blocklist_unban', ip=e['ip']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="secondary">разбанить на всех</button>
+        </form>
+        {% if current_role == 'admin' %}
+        <form method="post" action="{{ url_for('admin_blocklist_delete', ip=e['ip']) }}" class="inline"
+              onsubmit="return confirm('Удалить {{ e['ip'] }} из базы блок-листа?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">удалить из базы</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">блок-лист пуст</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if current_role == 'admin' %}
+<h2>Добавить IP вручную</h2>
+<div class="panel">
+  <form method="post" action="{{ url_for('admin_blocklist_add') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="ip" placeholder="1.2.3.4" required>
+    <button type="submit">Забанить на всех</button>
+  </form>
+</div>
+{% endif %}
+
+<h2>Игнор-лист блок-листа («это не бот»)</h2>
+<div class="panel">
+  <table>
+    <tr><th>Сеть</th><th>Комментарий</th><th>Кем</th>{% if current_role == 'admin' %}<th></th>{% endif %}</tr>
+    {% for r in ignore_entries %}
+    <tr>
+      <td>{{ r['network'] }}</td><td class="muted">{{ r['comment'] or '' }}</td><td class="muted">{{ r['added_by'] }}</td>
+      {% if current_role == 'admin' %}
+      <td>
+        <form method="post" action="{{ url_for('admin_blocklist_ignore_delete', ignore_id=r['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="secondary">убрать</button>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">пусто</td></tr>
+    {% endfor %}
+  </table>
+  {% if current_role == 'admin' %}
+  <form method="post" action="{{ url_for('admin_blocklist_ignore_add') }}" style="margin-top:0.6rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="network" placeholder="203.0.113.0/24 или 203.0.113.5" required>
+    <input name="comment" placeholder="комментарий">
+    <button type="submit">Добавить</button>
+  </form>
+  <p class="muted">Сети шире /8 не принимаются — вероятная опечатка в маске.</p>
+  <form method="post" action="{{ url_for('admin_blocklist_ignore_import') }}" enctype="multipart/form-data" style="margin-top:0.6rem;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="file" name="file" accept=".txt" required>
+    <button type="submit" class="secondary">Импортировать из файла</button>
+  </form>
+  <p class="muted">
+    По одной сети/IP на строку, строки с <code>#</code> — комментарии, пропускаются.
+    <a href="{{ url_for('admin_blocklist_ignore_export') }}">Экспортировать в файл</a> (тот же формат).
+  </p>
+  {% endif %}
+</div>
+
+<h2>Бан сети Tor</h2>
+<div class="panel">
+  <p>{% if tor_enabled %}<span class="badge done">включён</span>{% else %}<span class="badge">выключен</span>{% endif %}
+     — сейчас в списке {{ tor_nodes_count }} exit-нод. Включить/выключить — на странице «Настройки».</p>
+  {% if current_role == 'admin' %}
+  <form method="post" action="{{ url_for('admin_blocklist_tor_refresh') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="secondary">Обновить сейчас</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Пользователи — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Пользователи</h1>
+<div class="panel">
+  <table>
+    <tr><th>Логин</th><th>Роль</th><th>Сброс пароля</th><th></th></tr>
+    {% for u in users %}
+    <tr>
+      <td>{{ u['username'] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin_users_role', user_id=u['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <select name="role"
+                  onchange="if (confirm('Сменить роль пользователя «{{ u['username'] }}» на ' + this.value + '?')) { this.form.submit() } else { this.value = '{{ u['role'] }}' }">
+            <option value="admin" {% if u['role'] == 'admin' %}selected{% endif %}>admin</option>
+            <option value="operator" {% if u['role'] == 'operator' %}selected{% endif %}>operator</option>
+          </select>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('admin_users_reset_password', user_id=u['id']) }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="password" name="password" placeholder="новый пароль">
+          <button type="submit" class="secondary">сбросить</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('admin_users_delete', user_id=u['id']) }}" class="inline"
+              onsubmit="return confirm('Удалить пользователя «{{ u['username'] }}»?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="danger">удалить</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Добавить пользователя</h2>
+<div class="panel">
+  <form method="post" action="{{ url_for('admin_users_add') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input name="username" placeholder="логин" required>
+    <input type="password" name="password" placeholder="пароль" required>
+    <select name="role">
+      <option value="operator">operator</option>
+      <option value="admin">admin</option>
+    </select>
+    <button type="submit">Создать</button>
+  </form>
+</div>
+{% endblock %}

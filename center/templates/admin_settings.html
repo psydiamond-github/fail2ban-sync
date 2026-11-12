@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Настройки — fail2ban-center{% endblock %}
+{% block content %}
+<h1>Настройки</h1>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+<div class="panel">
+  <h2 style="margin-top:0">Протокол агентов</h2>
+  <p><label>Интервал чекина по умолчанию, сек<br>
+    <input name="checkin_interval_seconds" value="{{ settings.get('checkin_interval_seconds', '60') }}"></label></p>
+  <p><label>Задача считается потерянной после стольких пропущенных чекинов<br>
+    <input name="agent_task_stale_after_missed" value="{{ settings.get('agent_task_stale_after_missed', '5') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Веб-интерфейс</h2>
+  <p><label>Тайм-аут сессии, мин<br>
+    <input name="session_idle_timeout_minutes" value="{{ settings.get('session_idle_timeout_minutes', '30') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Глобальный блок-лист</h2>
+  <p><label><input type="checkbox" name="global_block_enabled" value="1"
+      {% if settings.get('global_block_enabled') == '1' %}checked{% endif %}> включён</label></p>
+  <p><label>Порог банов<br>
+    <input name="global_block_threshold" value="{{ settings.get('global_block_threshold', '5') }}"></label></p>
+  <p><label>Режим срока блокировки<br>
+    <select name="global_block_duration_mode">
+      <option value="permanent" {% if settings.get('global_block_duration_mode') == 'permanent' %}selected{% endif %}>постоянно</option>
+      <option value="longest_jail_bantime" {% if settings.get('global_block_duration_mode') == 'longest_jail_bantime' %}selected{% endif %}>самый долгий bantime джейла агента</option>
+    </select></label></p>
+  <p><label>Параллелизм массовых операций<br>
+    <input name="global_block_bulk_max_workers" value="{{ settings.get('global_block_bulk_max_workers', '8') }}"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Бан сети Tor</h2>
+  <p><label><input type="checkbox" name="tor_block_enabled" value="1"
+      {% if settings.get('tor_block_enabled') == '1' %}checked{% endif %}> включён</label></p>
+  <p><label>Путь к локальному файлу со списком exit-нод (если задан — читается он, в сеть центр
+     не ходит вообще; список туда кладёт что-то внешнее, например cron/rsync)<br>
+    <input name="tor_block_source_path" value="{{ settings.get('tor_block_source_path', '') }}" style="width:100%" placeholder="/opt/fail2ban-center/data/tor-exit-list.txt"></label></p>
+  <p><label>Иначе — URL источника (пусто выше обязательно, чтобы использовать)<br>
+    <input name="tor_block_source_url" value="{{ settings.get('tor_block_source_url', '') }}" style="width:100%"></label></p>
+  <p><label>Прокси для скачивания по URL (пусто — напрямую), например <code>socks5h://127.0.0.1:30303</code><br>
+    <input name="tor_block_proxy_url" value="{{ settings.get('tor_block_proxy_url', '') }}" style="width:100%"></label></p>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Просмотр логов</h2>
+  <p><label>Режим<br>
+    <select name="log_view_mode">
+      <option value="none" {% if settings.get('log_view_mode', 'none') == 'none' %}selected{% endif %}>выключен</option>
+      <option value="local" {% if settings.get('log_view_mode') == 'local' %}selected{% endif %}>локально на центре (агент докачивает инкрементально)</option>
+      <option value="graylog" {% if settings.get('log_view_mode') == 'graylog' %}selected{% endif %}>через Graylog (хосты, чей лог не попадает в Graylog, — с самого хоста)</option>
+    </select></label></p>
+  <p><label>Строк лога на странице (режим «локально»)<br>
+    <input name="fail2ban_log_lines" value="{{ settings.get('fail2ban_log_lines', '300') }}"></label></p>
+  <p><label>Максимальный размер кэша на агента, байт (режим «локально»)<br>
+    <input name="local_log_max_bytes" value="{{ settings.get('local_log_max_bytes', '2000000') }}"></label></p>
+</div>
+
+<div class="panel" id="graylog">
+  <h2 style="margin-top:0">Graylog</h2>
+  <p class="muted">
+    Graylog только принимает логи, центр в нём только <b>читает</b>: показывает лог fail2ban
+    хоста на вкладке «Лог» (режим «через Graylog» выше). Банят по-прежнему джейлы fail2ban на
+    хостах. Ставить на серверы ничего не нужно. Что сделать в Graylog:
+  </p>
+  <ol class="muted">
+    <li>Лог fail2ban хостов (<code>/var/log/fail2ban.log</code> или journald) уже должен
+        приходить в Graylog — rsyslog, Graylog Sidecar, чем угодно. Поле <code>source</code>
+        сообщения — имя хоста; оно сопоставляется с именем агента (или с «Именем хоста в Graylog»
+        в настройках агента). Ниже укажите, как в Graylog отличить эти сообщения от остальных.</li>
+    <li>System → Users → Create user: роль <b>Reader</b>. Роль сама по себе не даёт искать —
+        дайте пользователю доступ на чтение к потоку с логами (Streams → у потока «Share» →
+        пользователь, «Viewer»), в том числе если это «All messages».</li>
+    <li>У этого пользователя: Edit tokens → Create token. Токен вставьте ниже.</li>
+  </ol>
+  <p><label>URL Graylog (веб-интерфейс/API)<br>
+    <input name="graylog_url" value="{{ settings.get('graylog_url', '') }}" style="width:100%" placeholder="https://graylog.example.org:9000"></label></p>
+  <p><label><input type="checkbox" name="graylog_verify_tls" value="1"
+      {% if settings.get('graylog_verify_tls', '1') == '1' %}checked{% endif %}> проверять сертификат Graylog
+      (снимите, если у Graylog самоподписанный сертификат)</label></p>
+  <p><label>API-токен {% if settings.get('graylog_api_token') %}<span class="muted">(сохранён — оставьте пустым, чтобы не менять)</span>{% endif %}<br>
+    <input type="password" name="graylog_api_token" value=""
+           placeholder="{{ '••••••••••••••••' if settings.get('graylog_api_token') else '' }}"
+           autocomplete="new-password" style="width:100%"></label></p>
+  <p><label>Stream ID (необязательно — искать только в этом потоке)<br>
+    <input name="graylog_stream_id" value="{{ settings.get('graylog_stream_id', '') }}"></label></p>
+  <p><label>Поле с именем хоста в сообщениях Graylog (значение сравнивается с именем агента или его
+    «Именем хоста в Graylog»). Обычно <code>source</code>; если там IP сборщика, а имя хоста лежит в
+    другом поле — укажите его, например <code>hostname</code><br>
+    <input name="graylog_host_field" value="{{ settings.get('graylog_host_field', 'source') }}"></label></p>
+  <p><label>Как в Graylog отличить сообщения fail2ban (вкладка «Лог» показывает только их, а не
+    весь лог хоста)<br>
+    <input name="graylog_fail2ban_query" value="{{ settings.get('graylog_fail2ban_query', 'application_name:fail2ban*') }}" style="width:100%"></label></p>
+  <p><label>Диапазон по умолчанию, часов<br>
+    <input name="graylog_default_range_hours" value="{{ settings.get('graylog_default_range_hours', '24') }}"></label></p>
+  <p><label>Строк лога по умолчанию<br>
+    <input name="graylog_default_log_lines" value="{{ settings.get('graylog_default_log_lines', '300') }}"></label></p>
+</div>
+
+<button type="submit">Сохранить</button>
+</form>
+
+<form method="post" action="{{ url_for('admin_graylog_check') }}" style="margin-top:1em">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="secondary">Проверить подключение к Graylog</button>
+  <span class="muted">— проверяет сохранённые настройки: адрес, токен и право на поиск.</span>
+</form>
+{% endblock %}

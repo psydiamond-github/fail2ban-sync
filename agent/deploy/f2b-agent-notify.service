@@ -1,0 +1,17 @@
+[Unit]
+Description=fail2ban-center agent — отправить в центр уведомления о банах/разбанах
+After=network-online.target
+# Волна банов (общий блок-лист, синхронизация Tor) запускает службу много раз подряд. С
+# ограничением по умолчанию (5 запусков за 10 с) systemd переводит f2b-agent-notify.path в
+# failed (unit-start-limit-hit), и уведомления перестают работать до перезагрузки.
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+# root: файл событий создаёт fail2ban (root, 0600), а токен в config.json читает root:f2b-agent.
+# Секунда на то, чтобы пачка банов накопилась в файле и ушла за один запуск.
+ExecStartPre=/bin/sleep 1
+ExecStart=/usr/bin/python3 /usr/local/sbin/f2b-agent-notify --flush-spool
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/run/fail2ban
