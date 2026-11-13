@@ -518,9 +518,10 @@ def queue_temp_ignore_remove(agent_id: int, jail: str, ip: str, actor: str) -> N
 
 
 def sync_permanent_ignore(agent_id: int, actor: str) -> None:
-    # Шлём только адреса, добавленные через центр. Базовый ignoreip хоста живёт на самом
-    # хосте (00-f2b-agent-base.local) и подставляется там переменной — центр его не трогает
-    # и не копирует. baseline_ignoreip в БД — только для показа в панели.
+    # Шлём только адреса, добавленные через центр; агент кладёт их в свою переменную
+    # f2b_center_ignoreip. Базовый ignoreip хоста живёт в jail.local (переменная
+    # f2b_base_ignoreip) и подставляется рядом — центр его не трогает и не копирует.
+    # baseline_ignoreip в БД — только для показа в панели.
     ours = [r["ip"] for r in db.list_permanent_ignore(agent_id)]
     db.queue_task(agent_id, "permanent_ignore_sync", {"ip_list": ours}, actor)
 
