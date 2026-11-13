@@ -108,7 +108,7 @@ def create_app() -> Flask:
                     {"id": g["id"], "name": g["name"], "children": build(g["id"])}
                     for g in children_by_parent.get(parent_id, [])
                 ],
-                "agents": [{"id": a["id"], "name": a["name"]} for a in agents_by_group.get(parent_id, [])],
+                "agents": [{"id": a["id"], "name": a["name"], "group_id": a["group_id"]} for a in agents_by_group.get(parent_id, [])],
             }
 
         tree = build(None)
@@ -472,6 +472,21 @@ def create_app() -> Flask:
             vpn_endpoint=f"{db.get_setting('vpn_endpoint_host')}:{db.get_setting('vpn_listen_port')}",
             vpn_subnet_prefix=db.get_setting("vpn_subnet", "10.99.0.0/24").split("/")[1],
         )
+
+    @app.route("/admin/agents/<int:agent_id>/set-group", methods=["POST"])
+    @auth.require_admin
+    def admin_agent_set_group(agent_id):
+        # Быстрая смена/назначение группы хоста прямо со страницы «Группы»
+        # (выпадающий список + «применить» напротив хоста). Возврат туда же.
+        _agent_or_404(agent_id)
+        if not auth.check_csrf(request.form):
+            auth.flash_csrf_error()
+            return redirect(url_for("admin_groups"))
+        group_id = request.form.get("group_id", type=int) or None
+        db.set_agent_group(agent_id, group_id)
+        db.log_action(_actor(), agent_id, "agent_group_changed")
+        flash("Группа хоста обновлена.", "ok")
+        return redirect(url_for("admin_groups"))
 
     @app.route("/admin/agents/<int:agent_id>/vpn/add", methods=["POST"])
     @auth.require_admin
